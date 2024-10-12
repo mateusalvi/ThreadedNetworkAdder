@@ -1,0 +1,23 @@
+{
+    "files.associations": {
+        "sysinfoapi.h": "c",
+        "interface.h": "c",
+        "utilapiset.h": "c",
+        "monitoring.h": "c",
+        "stdio.h": "c",
+        "management.h": "c",
+        "stat.h": "c",
+        "unistd.h": "c",
+        "stdlib.h": "c",
+        "signal.h": "c",
+        "discovery.h": "c",
+        "string.h": "c",
+        "stdbool.h": "c",
+        "compare": "c",
+        "cstdint": "c",
+        "system_error": "c",
+        "pthread.h": "c",
+        "client.h": "c",
+        "constants.h": "c"
+    }
+}
