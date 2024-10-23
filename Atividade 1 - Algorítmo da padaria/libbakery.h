@@ -1,12 +1,11 @@
 #ifndef _BAKERY_
 #define _BAKERY_
 
-/*##########################################################
-#                                                          #
-# INF01151 - Sistemas Operacionais II N - Turma A (2024/1) #
-#           Mateus Luiz Salvi - Bianca Pelegrini           #
-#                                                          #
-##########################################################*/
+
+//INF01151 - Sistemas Operacionais II N 
+//Mateus Luiz Salvi - 
+
+
 
 #include <pthread.h>
 #include <string.h>
