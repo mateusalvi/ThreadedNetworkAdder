@@ -1,5 +1,8 @@
 // INF01151 - Sistemas Operacionais II N
-// Mateus Luiz Salvi -
+// Mateus Luiz Salvi – 00229787
+// Adilson Enio Pierog – 00158803
+// Andres Grendene Pacheco - 00264397
+// Luís Filipe Martini Gastmann - 00276150
 
 #include "lamport.h"
 #include <pthread.h>
@@ -42,7 +45,7 @@ int main(int argc, char **argv)
     for (thread_num = 0; thread_num < N_THREADS; thread_num++)
     {
         ret = pthread_join(tinfo_process[thread_num], &res);
-        //printf("Joined with thread id %d\n", thread_num);
+        printf("Joined with thread id %d\n", thread_num);
         free(res);
     }
 

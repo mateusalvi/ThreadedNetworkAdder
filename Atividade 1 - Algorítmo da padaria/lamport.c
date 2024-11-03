@@ -1,30 +1,35 @@
+// INF01151 - Sistemas Operacionais II N
+// Mateus Luiz Salvi – 00229787
+// Adilson Enio Pierog – 00158803
+// Andres Grendene Pacheco - 00264397
+// Luís Filipe Martini Gastmann - 00276150
+
 #include "lamport.h"
 
 void lamport_mutex_init()
 {
-  mutex_AT = 0;
   accumulator = 0;
-
-  for (size_t i = 0; i < N_THREADS; i++)
+  int i;
+  for (i = 0; i < N_THREADS; i++)
   {
-    choosing[i] = 0; 
+    choosing[i] = false;
     ticket[i] = 0;
   }
 }
 
 void lamport_mutex_lock(int i)
 {
-  choosing[i] = 1;
+  choosing[i] = true;
   ticket[i] = max_ticket() + 1;
-  choosing[i] = 0;
-
-  for (int j = 0; j <= N_THREADS; j++)
+  choosing[i] = false;
+  int j;
+  for (j = 0; j < N_THREADS; j++)
   {
     while (choosing[j])
-    { 
+    {
     }
     while (ticket[j] != 0 && ((ticket[j] < ticket[i]) || (ticket[j] == ticket[i] && j < i)))
-    { 
+    {
     }
   }
 }
@@ -45,21 +50,17 @@ int max_ticket()
 void *lamport_thread_process(void *arg)
 {
   int i = *((int *)arg);
-  int shouldRun = 1;
-  //printf("Hello! I'm thread %d!\n", i);
-  
-  do{
-    lamport_mutex_lock(i);
+  int interactionsCounter = 0;
 
-    //printf("I'm thread %d and I'm entering  my critical region!\n", i);
-    if(accumulator < N_ITERACTIONS)
-      accumulator++;
-    else
-      shouldRun = 0;
-    //printf("I'm thread %d and I'm leaving my critical region!\n", i);
+  lamport_mutex_lock(i);
 
-    lamport_mutex_unlock(i);
-  }while (shouldRun > 0);
+  do
+  {
+    accumulator++;
+    interactionsCounter++;
+  } while (interactionsCounter != N_ITERACTIONS);
+
+  lamport_mutex_unlock(i);
 
   return NULL;
 }
@@ -67,19 +68,17 @@ void *lamport_thread_process(void *arg)
 void *hw_thread_process(void *arg)
 {
   int i = *((int *)arg);
-  int shouldRun = 1;
-  //printf("Hello! I'm thread %d!\n", i);
-  
-  do{
-    pthread_mutex_lock(&lock);
-    
-    if(accumulator < N_ITERACTIONS)
-      accumulator++;
-    else
-      shouldRun = 0;
+  int interactionsCounter = 0;
 
-    pthread_mutex_unlock(&lock);
-  }while (shouldRun > 0);
+  pthread_mutex_lock(&lock);
+
+  do
+  {
+    accumulator++;
+    interactionsCounter++;
+  } while (interactionsCounter != N_ITERACTIONS);
+
+  pthread_mutex_unlock(&lock);
 
   return NULL;
 }
