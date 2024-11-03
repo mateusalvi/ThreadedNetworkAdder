@@ -1,8 +1,7 @@
-//INF01151 - Sistemas Operacionais II N 
-//Mateus Luiz Salvi - 
+// INF01151 - Sistemas Operacionais II N
+// Mateus Luiz Salvi -
 
-#include "libbakery.h"
-
+#include "lamport.h"
 #include <pthread.h>
 #include <string.h>
 #include <stdio.h>
@@ -11,68 +10,43 @@
 #include <errno.h>
 #include <ctype.h>
 
-#define handle_error_en(en, msg) \
-  do { errno = en; perror(msg); exit(EXIT_FAILURE); } while (0)
-
-#define handle_error(msg) \
-  do { perror(msg); exit(EXIT_FAILURE); } while (0)
-
-#define num_threads 3
-
-int shared_var = 0;
-int num_rep = 3000000;
-
-struct thread_info {
-    pthread_t id;
-    int num;
-};
-
-static void * thread_start(void *arg)
-{
-    struct thread_info *tinfo = arg;
-    
-    printf("Hello! I'm thread %d, id %lu!\n", tinfo->num, tinfo->id);
-    for (int i = 0; i < num_rep; i++)
-        shared_var = shared_var + 1;
-    
-    return 0x0;
-}
+#define SUMS 3000000
 
 int main(int argc, char **argv)
 {
     int thread_num, ret;
-    struct thread_info tinfo[num_threads];
+    pthread_t tinfo_process[N_THREADS];
+    int tinfo_id[N_THREADS];
     pthread_attr_t attr;
     void *res;
-    
-    if (argc > 1)
-        num_rep = strtol(argv[1], NULL, 10);
-    
+
+    lamport_mutex_init();
     ret = pthread_attr_init(&attr);
-    if (ret != 0)
-        handle_error_en(ret, "pthread_attr_init");
-    
-    for (thread_num = 0; thread_num < num_threads; thread_num++) {
-        tinfo[thread_num].num = thread_num + 1;
-        
-        ret = pthread_create(&tinfo[thread_num].id, &attr, &thread_start, &tinfo[thread_num]);
-        if (ret != 0)
-            handle_error_en(ret, "pthread_create");
+    printf("\n%s\n", argv[1]);
+    for (thread_num = 0; thread_num < N_THREADS; thread_num++)
+    {
+        tinfo_id[thread_num] = thread_num;
+        if(strcmp(argv[1], "lamport") == 0)
+            ret = pthread_create(&tinfo_process[thread_num], &attr, &lamport_thread_process, &tinfo_id[thread_num]);
+        else if(strcmp(argv[1], "pthread") == 0)
+            ret = pthread_create(&tinfo_process[thread_num], &attr, &hw_thread_process, &tinfo_id[thread_num]);
+        else
+        {
+            printf("\nWrong parameter\n");
+            return(EXIT_FAILURE);
+        }
     }
-    
+
     ret = pthread_attr_destroy(&attr);
-    if (ret != 0)
-        handle_error_en(ret, "pthread_attr_destroy");
-        
-    for (thread_num = 0; thread_num < num_threads; thread_num++) {
-        ret = pthread_join(tinfo[thread_num].id, &res);
-        if (ret != 0)
-            handle_error_en(ret, "pthread_join");
-        
-        printf("Joined with thread %d, id %lu\n", tinfo[thread_num].num, tinfo[thread_num].id);
+
+    for (thread_num = 0; thread_num < N_THREADS; thread_num++)
+    {
+        ret = pthread_join(tinfo_process[thread_num], &res);
+        //printf("Joined with thread id %d\n", thread_num);
         free(res);
     }
-    printf("Global var: %d\n", shared_var);
-    
+
+    printf("\nFinal accumulator value: %d \n", accumulator);
+
     exit(EXIT_SUCCESS);
 }

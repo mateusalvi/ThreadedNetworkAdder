@@ -5,25 +5,22 @@
 
 int choosing [N_THREADS];
 int ticket [N_THREADS];
+int mutex_AT, accumulator;
 
 void lamport_mutex_init()
 {
-  for (int i = 0; i < N_THREADS; i++)
-  {
-    choosing[i] = 0;
-    ticket[i] = 0;
-  }
-  
+	mutex_AT = 0;
+	accumulator = 0;
 }
 
 void lamport_mutex_lock (int thread_id)
 {
-
+	mutex_AT = 1;
 }
 
 void lamport_mutex_unlock (int thread_id)
 {
-
+	mutex_AT = 0;
 }
 
 void dormir() 
@@ -57,14 +54,27 @@ void *thread_process(void *arg)
       while (ticket[j] != 0 && ((ticket[j] < ticket[i]) || (ticket[j] == ticket[i] && j < i)))
         /* nao fazer nada */;
     }
-
-    printf("I'm thread %d and I'm entering my critical region!\n", i);
-    dormir();
+	
+/*ALTERAÇAO - AREA CRITICA */	
+/* Lock mutex, locked_mutex = 1 */
+	
+	lamport_mutex_lock(i);
+	if(mutex_AT != 1) printf("An error ocurred in the critical region \n"); //backup
+	else{
+    printf("I'm thread %d and I'm entering my critical region!, accumulator value = %d \n", i, accumulator);
+	
+	accumulator++; //Accumulator for N_THREADS, counting from 0 to N_ITERACTIONS
+	
+	
     printf("I'm thread %d and I'm leaving my critical region!\n", i);
+	}
+	lamport_mutex_unlock(i);
+/* Unlock mutex, locked_mutex = 0*/ 
+	
 
     ticket[i] = 0; /* indicar que saimos da secao critica */
 
-  }while (1);
+  }while (accumulator <= N_ITERACTIONS);
 
   return NULL;
 }

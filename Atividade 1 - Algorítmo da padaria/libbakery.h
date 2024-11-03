@@ -16,6 +16,7 @@
 #include <ctype.h>
 
 #define N_THREADS 10
+#define N_ITERACTIONS 3000
 
 void lamport_mutex_init();
 void lamport_mutex_lock (int thread_id);
