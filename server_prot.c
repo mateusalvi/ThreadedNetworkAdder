@@ -200,7 +200,6 @@ void server_functioning(int argc, char **argv)
     pthread_attr_t attr;
     void *res;
 	pid_t p,p2;
-    char porta[MAX_BUFFER];
 	
 
 	
