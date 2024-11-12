@@ -39,7 +39,6 @@
 
 /* Variaveis compartilhadas */
 
-pthread_mutex_t mutex, mutex_op, mutex_op2;
 int server_acc = 0;
 int server_running = 0;
 int thread_num = 0;
@@ -140,6 +139,7 @@ typedef struct client_data{
 	Encerra quando o cliente desconecta
 =====================================================================================*/
 static void * client_thread(void *arg){
+	pthread_mutex_t mutex, mutex_op, mutex_op2;
 	CLIENT_INFO* this_client;
 	pid_t p1;
 	int request_number = 0;
