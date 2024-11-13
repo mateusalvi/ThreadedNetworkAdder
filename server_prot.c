@@ -79,9 +79,9 @@ typedef struct client_data{
 	 
 	 
 //Casting CONFERIR
-	 CLIENT_INFO* temp_client = *((CLIENT_INFO*)arg);
+	 c
 
-     while (TRUE) {
+     while ((*temp_client).is_connected != 0) {
 		 //-- sleep(rand()%5); --
 	     pthread_mutex_lock(&mutex);
 	     while (count == MAX_BUFFER)
@@ -113,7 +113,10 @@ typedef struct client_data{
  }
 
  void *consumidor(void *arg) {
-     while (TRUE) {
+	 
+     // Conferir casting
+     CLIENT_INFO* temp_client = *((CLIENT_INFO*)arg);
+     while ((*temp_client).is_connected != 0) {
 		 //-- sleep(rand()%5); --
 	     pthread_mutex_lock(&mutex);
 	     while (count == 0)
@@ -121,6 +124,7 @@ typedef struct client_data{
 	     my_task = buffer[out];
 	     count--;
          printf("Processando o valor do client buffer[%d] = %d\n", out, my_task);
+	 return_value_to_client(server_acc); //IMPLEMENTAR a funcao que retorna pro cliente
          out = (out + 1) % MAX_BUFFER;
 	     pthread_cond_signal(&cond_empty);
 	     pthread_mutex_unlock(&mutex);
@@ -163,8 +167,8 @@ static void * client_thread(void *arg){
 		pthread_mutex_init(&mutex, NULL);
 		pthread_mutex_init(&mutex_op2, NULL);
 
-		pthread_create(&prod, NULL, (void *)produtor, NULL);
-		pthread_create(&cons, NULL, (void *)consumidor, NULL);
+		pthread_create(&prod, NULL, (void *)produtor, this_client);
+		pthread_create(&cons, NULL, (void *)consumidor, this_client);
 		
 	}
 	pthread_exit(0);
