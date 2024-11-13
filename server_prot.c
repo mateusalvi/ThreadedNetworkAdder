@@ -79,7 +79,7 @@ typedef struct client_data{
 	 
 	 
 //Casting CONFERIR
-	 c
+     CLIENT_INFO* this_client = *((CLIENT_INFO*)arg);
 
      while ((*temp_client).is_connected != 0) {
 		 //-- sleep(rand()%5); --
