@@ -144,6 +144,8 @@ typedef struct client_data{
 =====================================================================================*/
 static void * client_thread(void *arg){
 	pthread_mutex_t mutex, mutex_op, mutex_op2;
+	pthread_cond_t 	cond_empty, cond_full;
+	int buffer[MAX_BUFFER];
 	CLIENT_INFO* this_client;
 	pid_t p1;
 	int request_number = 0;
@@ -198,7 +200,7 @@ void server_functioning(int argc, char **argv)
 {
     int ret, ret2[MAX_CLIENTS], cont = 0;
     pthread_t tinfo_process[MAX_CLIENTS];
-    int tinfo_id[N];
+    int tinfo_id[MAX_CLIENTS];
 	int last_client;
 	CLIENT_INFO new_client[MAX_CLIENTS];
     pthread_attr_t attr;
@@ -209,7 +211,7 @@ void server_functioning(int argc, char **argv)
 	
 // Inicializacao de variaveis - CONFERIR SE TA PEGANDO A PORTA DE MANEIRA CERTA
 	strtok(*argv," ");
-	porta = strtok(NULL," ");
+	strcpy(porta,strtok(NULL," "));;
 	
 	printf("A porta de acesso eh %s \n",porta);
 	server_running = 1;
