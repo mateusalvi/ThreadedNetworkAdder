@@ -1,0 +1,3 @@
+https://pubs.opengroup.org/onlinepubs/9699919799/functions/contents.html
+
+https://askubuntu.com/questions/1493271/how-to-detect-events-like-sleep-wake-in-linux
