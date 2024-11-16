@@ -242,7 +242,7 @@ void server_functioning(int argc, char **argv)
 		}			
 				
 //Criacao de uma thread por cliente, a funcao client thread vai tratar das solicitacoes de cada cliente
-				ret2[thread_num] = pthread_create(&tinfo_process[thread_num], &attr, &client_thread, new_client[thread_num]);
+				ret2[thread_num] = pthread_create(&tinfo_process[thread_num], &attr, &client_thread, &new_client[thread_num]);
 			}
 
 // Encerramento do server e join das threads
