@@ -11,4 +11,7 @@
 #include <stdlib.h>
 #include "constants.h"
 
+void UpdateInterface();
+void Draw();
+
 #endif

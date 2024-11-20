@@ -27,10 +27,11 @@
 #include <netinet/in.h>
 
 #define MAXTHREADS 100
+#define MAX_BUFFER 100
+#define MAX_CLIENTS 100
 #define BROADCAST_PORT 20000
 #define MAX_MESSAGE_LEN 100
-#define CLIENT_SIGNIN_MESSAGE "s#i#g#n#i#n"
-#define MAGIC_PACKAGE_SUFIX "\xff\xff\xff\xff\xff\xff"
+#define SERVER_DISCOVERY_MESSAGE "s#i#g#n#i#n"
 
 pthread_t threads[MAXTHREADS];
 

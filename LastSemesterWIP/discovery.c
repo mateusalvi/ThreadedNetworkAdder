@@ -134,7 +134,7 @@ void* BroadcastSleep(char* broadcastAdress)
 
 void* SendMessage(char* _message, char* ip, int port)
 {
-    printf("Sending package to %s with message \"%s\"...\n", ip, _message);
+    printf("Sending package to %s:%d with message \"%s\"...\n", ip, port, _message);
 
     int sockfd;
     struct sockaddr_in dest_addr;
@@ -149,7 +149,7 @@ void* SendMessage(char* _message, char* ip, int port)
     memset(&dest_addr, 0, sizeof(dest_addr));
     dest_addr.sin_family = AF_INET;                 // IPv4
     dest_addr.sin_port = htons(port);               // Port number
-    dest_addr.sin_addr.s_addr = inet_addr(ip); // IP address of the destination (localhost in this case)
+    dest_addr.sin_addr.s_addr = inet_addr(ip);      // IP address of the destination
 
     // Prepare the data to send
     // char message[MAX_MESSAGE_LEN] = "SLEEPING";

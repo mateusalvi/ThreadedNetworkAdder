@@ -4,24 +4,29 @@
 ##########################################################*/
 
 #include "constants.h"
-#include "server.h"
+#include "server_prot.h"
+//#include "server.h"
 #include "client.h"
 
 int main(int argc, char *argv[])
 {
-    bool isManager = false;
-
-    if ((argv[1] != NULL) && (strcmp(argv[1], "$manager")))
-        isManager = true;
-
-    if(isManager)
+    int input;
+    while(1)
     {
-        RunServer();
+        printf("1 for client, 2 for server\n");
+        scanf("%d", &input);
+        switch (input)
+        {
+        case 1:
+            RunClient(atoi(argv[1]));
+            break;
+        case 2:
+            ServerMain(argv[1]);
+            break;
+        
+        default:
+            break;
+        }
     }
-    else
-    {
-        RunClient();
-    }
-
     return 0;
 }

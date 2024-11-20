@@ -8,38 +8,6 @@
 const char* myIp;
 const char* serverIp;
 
-void HandleSystemSignals(int sig)
-{ 
-    switch (sig)
-    {
-        case 2: //Code 2 is for OS calling EXIT
-            system("clear");
-            printf("OS Signal %d recieved. Exiting.\n", sig);
-            exit(0);
-            break;
-        
-        default:
-            printf("Caught signal %d\n", (int)sig);
-            break;
-    }
-}
-
-void* ClientCatchSignal(void* arg)
-{
-    bool shouldRun = true;
-
-    while (shouldRun) 
-    { 
-        signal(SIGINT, *HandleSystemSignals);
-        signal(SIGSEGV, *HandleSystemSignals);
-        signal(SIGILL, *HandleSystemSignals);
-        signal(SIGFPE, *HandleSystemSignals);
-        signal(SIGTERM, *HandleSystemSignals);
-    } 
-
-    pthread_exit(&arg);
-}
-
 void* ClientInputSubprocess()
 {
     char userInput[4];
@@ -57,26 +25,10 @@ void* ClientInputSubprocess()
             printf("SHOULD EXIT NOW\n");
             exit(0);
         }
-        else if(strcmp(userInput, "SLEEP") == 0)
-        {
-            char* broadCastAdress = GetBroadcastAdress();
-            printf("Broadcasting SLEEP MODE to ip: %s\n", broadCastAdress);
-            BroadcastSleep(broadCastAdress);
-        }
-        else if(strcmp(userInput, "LOCAL") == 0)
-        {
-            printf("Broadcasting SLEEP MODE to localHost 127.0.0.1\n");
-            BroadcastSleep("127.0.0.1");
-        }
     }
 }
 
-void* ClientListenForWakeup()
-{
-    ListenForSleepBroadcasts(threads);
-}
-
-void RunClient()
+void RunClient(int port)
 {
     char hostbuffer[256];
     char *IPbuffer;
@@ -91,17 +43,20 @@ void RunClient()
 
 
     int signalArg, inputArg;
+    SendMessage(SERVER_DISCOVERY_MESSAGE, "127.0.0.1", port); //127.0.0.1 é o IP redundante, conexão da própria maquina com ela mesma.
 
-    SendMessage("sleep service discovery", IPbuffer, BROADCAST_PORT);
+
+    // SendMessage("Are you the server?", IPbuffer, port);
+
     //BroadcastSleep("127.0.0.1");
 
-    //Start Signal Catcher and Input Reader threads
-    pthread_create(&threads[THREAD_CLIENT_INPUT], NULL, ClientCatchSignal, &signalArg);
-    pthread_create(&threads[THREAD_CLIENT_SIGNAL_CATCHER], NULL, ClientInputSubprocess, &inputArg);
-    pthread_create(&threads[THREAD_CLIENT_WAKEUP_CATCHER], NULL, ClientInputSubprocess, &inputArg);
+    // //Start Signal Catcher and Input Reader threads
+    // pthread_create(&threads[THREAD_CLIENT_INPUT], NULL, ClientInputSubprocess, &signalArg);
+    // pthread_create(&threads[THREAD_CLIENT_SIGNAL_CATCHER], NULL, ClientCatchSignal, &inputArg);
 
-    //Wait for Signal Catcher and Input Reader threads
-    pthread_join(threads[THREAD_CLIENT_INPUT], NULL);
-    pthread_join(threads[THREAD_CLIENT_SIGNAL_CATCHER], NULL);
-    pthread_join(threads[THREAD_CLIENT_WAKEUP_CATCHER], NULL);
+
+    // //Wait for Signal Catcher and Input Reader threads
+    // pthread_join(threads[THREAD_CLIENT_INPUT], NULL);
+    // pthread_join(threads[THREAD_CLIENT_SIGNAL_CATCHER], NULL);
+
 }

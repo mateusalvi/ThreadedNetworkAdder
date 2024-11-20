@@ -10,13 +10,7 @@
 #include "processing.h"
 #include "discovery.h"
 
-void HandleSystemSignals(int sig);
-
-void* ClientCatchSignal(void* arg);
-
 void* ClientInputSubprocess();
-
-void* ClientListenForWakeup();
 
 void RunClient();
 
