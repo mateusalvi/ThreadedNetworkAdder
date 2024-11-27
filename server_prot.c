@@ -109,7 +109,7 @@ static void *ClientHandlerThread(void *arg)
 
 	// Fazer o casting corretamente CONFERIR!!!!!
 	this_client = ((CLIENT_INFO *)arg);
-
+	
 	// Fazer um fork para um processo filho aguardar que o cliente disconecte
 	p1 = fork();
 	if (p1 == 0)
@@ -182,14 +182,21 @@ void ServerMain(char* port)
 			while (isRunning != 0)
 			{
 				NetworkListenerSubprocess(port); //Start the P2 subprocess
-			}	
-		}
-		else //Parent
-		{
-			ret2[thread_num] = pthread_create(&tinfo_process[thread_num], &attr, &ClientHandlerThread, &clients[thread_num]);
+				thread_num++;
+				printf("Thread num %d \n", thread_num);
+				ret2[thread_num] = pthread_create(&tinfo_process[thread_num], &attr, &ClientHandlerThread, &clients[thread_num]);
 			// Criacao de uma thread por cliente, a funcao client thread vai tratar das solicitacoes de cada cliente
 			// }
 			// Encerramento do server e join das threads
+			}	
+			
+		}
+		else //Parent
+		{
+			// ret2[thread_num] = pthread_create(&tinfo_process[thread_num], &attr, &ClientHandlerThread, &clients[thread_num]);
+			// // Criacao de uma thread por cliente, a funcao client thread vai tratar das solicitacoes de cada cliente
+			// // }
+			// // Encerramento do server e join das threads
 
 			ret = pthread_attr_destroy(&attr);
 
@@ -217,17 +224,18 @@ void NetworkListenerSubprocess(char* port)
 	bool waitingForNewClient = true;
 	char* clientIP = NULL;
 	//printf("PID É %ld PARENT É %ld \n", (long)getpid(), (long)getppid());
-	do
-	{
-		RecieveDiscovery(port); // IMPLEMENTAR a funcao que vai estabelecer a conexao entre um cliente e o servidor (WAIT_CONNECTION)
-		if(clientIP != NULL)
-			waitingForNewClient = false;
-	}
-	while(waitingForNewClient);
+	// do
+	// {
+	int currentClientIndex = RecieveDiscovery(atoi(port)); // IMPLEMENTAR a funcao que vai estabelecer a conexao entre um cliente e o servidor (WAIT_CONNECTION)
 
-	RegisterNewClient(&clients[thread_num]); // IMPLEMENTAR funcao que "cadastra" um cliente no vetor de new_clients
-	printf("Thread num %d \n", thread_num);
-	thread_num++;
+	//TODO AQUI A GENTE TEM O INDEX NA LISTA DE CLIENTES DO NOSSO NOVO CLIENTE, AGORA PRECISAMOS INICIAR UMA THREAD QUE OUVE REQUESTS DELE.
+
+	// 	int a = strcmp(clientIP, NULL);
+	// 	if(a =! 0)
+	// 		waitingForNewClient = false;
+	// }
+	//while(waitingForNewClient);
+
 }
 
 int wait_closure()
@@ -267,13 +275,13 @@ void wait_disconnect(CLIENT_INFO *this_client)
 
 void RegisterNewClient(CLIENT_INFO *this_client)
 {
-	pthread_t prod, cons;
+	// pthread_t prod, cons;
 	
-	pthread_cond_init(&newClientsEmpty, NULL);
-	pthread_cond_init(&newClientsFull, NULL);
-	pthread_mutex_init(&mutexClientList, NULL);
-	AddNewClient(this_client);
-	pthread_create(&prod, NULL, (void *)ClientHandlerThread, &this_client);
-	//pthread_create(&cons, NULL, (void *)RegisterNewClient, this_client);
-	return;
+	// pthread_cond_init(&newClientsEmpty, NULL);
+	// pthread_cond_init(&newClientsFull, NULL);
+	// pthread_mutex_init(&mutexClientList, NULL);
+	// AddNewClient(this_client);
+	// pthread_create(&prod, NULL, (void *)ClientHandlerThread, &this_client);
+	// //pthread_create(&cons, NULL, (void *)RegisterNewClient, this_client);
+	// return;
 }

@@ -101,152 +101,218 @@ char *GetBroadcastAdress()
     strcpy(broadcast_addr, inet_ntoa(broadcast));
 
     close(sockfd);
+    printf("Broadcast address is: %s \n", broadcast_addr);
     return broadcast_addr;
 }
 
-void SendMessage(char *message, char *ip, int port)
+void SendMessage(char *message, char *ip, int port, char *returnMessage)
 {
-    printf("Sending package to %s:%d with message \"%s\"...\n", ip, port, message);
-
-    int sockfd;
-    struct sockaddr_in dest_addr;
-
-    // Create socket for sending datagrams
-    if ((sockfd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) == -1)
+    int sockfd, n;
+    unsigned int length;
+    struct sockaddr_in serv_addr, from;
+    struct hostent *server;
+ 
+    // if (argc < 2) {
+    // 	fprintf(stderr, "usage %s hostname\n", argv[0]);
+    // 	exit(0);
+    // }
+    printf("Sending message\n");
+    server = gethostbyname("broad"); //?????????????????????????????????????????????
+    if (server == NULL)
     {
-        perror("Socket creation failed!\n");
-        exit(EXIT_FAILURE);
+        fprintf(stderr, "ERROR, no such host\n");
+        exit(0);
     }
 
-    // Prepare the destination address structure
-    memset(&dest_addr, 0, sizeof(dest_addr));
-    dest_addr.sin_family = AF_INET;            // IPv4
-    dest_addr.sin_port = htons(port);          // Port number
-    dest_addr.sin_addr.s_addr = inet_addr(ip); // IP address of the destination (localhost in this case)
+    if ((sockfd = socket(AF_INET, SOCK_DGRAM, 0)) == -1)
+        printf("ERROR opening socket\n");
+    serv_addr.sin_family = AF_INET;
+    serv_addr.sin_port = htons(port);
+    serv_addr.sin_addr = *((struct in_addr *)server->h_addr);
+    bzero(&(serv_addr.sin_zero), 8);
 
-    // Prepare the data to send
-    // char message[MAX_MESSAGE_LEN] = "SLEEPING";
-    //char message[MAX_MESSAGE_LEN];
-    //strcpy(message, message);
-    int message_len = strlen(message);
-
-    // Send the message
-    if (sendto(sockfd, message, message_len, 0, (struct sockaddr *)&dest_addr, sizeof(dest_addr)) == -1)
+    n = sendto(sockfd, message, strlen(message), 0, (const struct sockaddr *)&serv_addr, sizeof(struct sockaddr_in));
+    if (n < 0)
     {
-        perror("Sendto failed!\n");
-        exit(EXIT_FAILURE);
+        printf("ERROR sendto\n");
+        exit(1);
     }
+    printf("Message sent\n");
+    printf("Waiting for server response...\n");
+    length = sizeof(struct sockaddr_in);
+    n = recvfrom(sockfd, returnMessage, 256, 0, (struct sockaddr *)&from, &length);
+    if (n < 0)
+        printf("ERROR recvfrom ");
 
-    printf("Message sent successfully.\n");
-    
+    //strcpy(*returnMessage, message);
+
     close(sockfd);
+
 }
 
-char* RecieveDiscovery(char* port)
+int RecieveDiscovery(int port)
 {
-    int sockfd;
-    struct sockaddr_in my_addr, client_addr;
-    socklen_t client_addr_len;
-    char buffer[MAX_MESSAGE_LEN];
-    char* clientIP;
+    int currentClientIndex;
+    int sockfd, n;
+    socklen_t clilen;
+    struct sockaddr_in serv_addr, cli_addr;
+    char buf[256];
+    if ((sockfd = socket(AF_INET, SOCK_DGRAM, 0)) == -1)
+        printf("ERROR opening socket");
 
-    // Create socket for receiving datagrams
-    if ((sockfd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) == -1) {
-        perror("socket creation failed");
-        exit(EXIT_FAILURE);
-    }
+    serv_addr.sin_family = AF_INET;
+    serv_addr.sin_port = htons(port);
+    serv_addr.sin_addr.s_addr = INADDR_ANY;
+    bzero(&(serv_addr.sin_zero), 8);
 
-    // Prepare the server address structure
-    memset(&my_addr, 0, sizeof(my_addr));
-    my_addr.sin_family = AF_INET;         // IPv4
-    my_addr.sin_port = htons(atoi(port));       // Port number
-    my_addr.sin_addr.s_addr = INADDR_ANY; // Accept packets from any IP address
+    //Copy ip adress to MyIP constant
+	inet_ntop( AF_INET, &serv_addr, MyIP, INET_ADDRSTRLEN );
 
-    // Bind socket to the server address
-    if (bind(sockfd, (struct sockaddr *)&my_addr, sizeof(my_addr)) == -1) 
-    {
-        perror("bind failed");
-        exit(EXIT_FAILURE);
-    }
+    if (bind(sockfd, (struct sockaddr *)&serv_addr, sizeof(struct sockaddr)) < 0)
+        printf("ERROR on binding");
 
-    //TODO: THIS WILL KEEP LOOPING FOR EVER.
-    while(1)
-    {
-        // Receive message from client
-        client_addr_len = sizeof(client_addr);
+    clilen = sizeof(struct sockaddr_in);
 
-        //------------------Aqui o programa vai ficar "parado" esperando a mensagem de alguem.
-        printf("UDP server listening on port %d...\n", atoi(port));
-        int recv_len = recvfrom(sockfd, buffer, MAX_MESSAGE_LEN, 0, (struct sockaddr *)&client_addr, &client_addr_len);
-        if (recv_len == -1)
-        {
-            perror("recvfrom failed");
-            exit(EXIT_FAILURE);
-        }
+    char message[MAX_MESSAGE_LEN];
+    char _port[10];
+    strcat(message,"#");
+    strcat(message, MyIP);
+    strcat(message,"#");
+    if(sprintf(_port, "%d", port) < 0)
+        printf("ERRO NO SPRINTF!\n");
+    strcat(message, _port);
+    strcat(message,"\0");
 
-        // Print details of the client
-        char client_ip[INET_ADDRSTRLEN];
-        //strcpy(clientIP, inet_ntop(AF_INET, &client_addr.sin_addr, client_ip, INET_ADDRSTRLEN));
-        printf("Received packet from %s:%d\n", inet_ntop(AF_INET, &client_addr.sin_addr, client_ip, INET_ADDRSTRLEN), ntohs(client_addr.sin_port));
+    // while (1)
+    // {
+        /* receive from socket */
+        n = recvfrom(sockfd, buf, 256, 0, (struct sockaddr *)&cli_addr, &clilen);
+        if (n < 0)
+            printf("ERROR on recvfrom");
+        printf("Received a datagram: %s\n", buf);
 
-
-
-        // Print received message
-        buffer[recv_len] = '\0'; // Add null terminator to received data
+        /* send to socket */
+        // n = sendto(sockfd, "Got your message\n", 17, 0, (struct sockaddr *)&cli_addr, sizeof(struct sockaddr));
+        // if (n < 0)
+        //     printf("ERROR on sendto");
         
-        if(strcmp(buffer, SERVER_DISCOVERY_MESSAGE) == 0)
+        //Se a menssagem recebida for a de SERVER DISCOVERY
+        if(strcmp(buf, SERVER_DISCOVERY_MESSAGE) == 0)
         {
-            printf("New client deected!\n");
-            //TODO 
-            CLIENT_INFO* newClient = (CLIENT_INFO*){ atoi(inet_ntop(AF_INET, &client_addr.sin_addr, client_ip, INET_ADDRSTRLEN)), 0, NULL, 1, 0 };// = (CLIENT_INFO*)NewClientStruct(atoi(inet_ntop(AF_INET, &client_addr.sin_addr, client_ip, INET_ADDRSTRLEN)));
-            printf("HERE SHOULD GO THE ADD NEW CLIENT CODE");
-            //memcpy(&newClient, (CLIENT_INFO*)NewClientStruct(atoi(inet_ntop(AF_INET, &client_addr.sin_addr, client_ip, INET_ADDRSTRLEN))), sizeof(CLIENT_INFO));
-            AddNewClient(newClient);
-            printf("New client added!\n");
+            //Responde ao novo cliente.
+            n = sendto(sockfd, &message, MAX_MESSAGE_LEN, 0, (struct sockaddr *)&cli_addr, sizeof(struct sockaddr));
+            if (n < 0)
+                printf("ERROR on sendto");
+            else
+            {
+                currentClientIndex = AddNewClient((struct sockaddr *)&cli_addr, port);
+                StartClientListener(currentClientIndex);
+            }
         }
-
-        printf(" with message: \"%s\"\n", buffer);
-    }
     
-    close(sockfd); // Close the socket
+    // }
 
-    return clientIP;
+    close(sockfd);
+
+    return currentClientIndex;
 }
 
-void AddNewClient(CLIENT_INFO *newClient)
+void StartClientListener(int currentClientIndex)
 {
-    CLIENT_INFO* tempClients[MAX_CLIENTS];
-    memcpy(&tempClients, GetClientsVector(), sizeof(CLIENT_INFO)*MAX_CLIENTS);
+    ListenForAddRequest(clients[currentClientIndex].port, clients[currentClientIndex].IP);
+}
 
-    for (int i = 0; i < MAX_CLIENTS; i++)
+char *ListenForAddRequest(int port, char* clientIP)
+{
+    int sockfd, n;
+    socklen_t clilen;
+    struct sockaddr_in serv_addr, cli_addr;
+    char buf[256];
+    if ((sockfd = socket(AF_INET, SOCK_DGRAM, 0)) == -1)
+        printf("ERROR opening socket");
+
+    serv_addr.sin_family = AF_INET;
+    serv_addr.sin_port = htons(port);
+    serv_addr.sin_addr.s_addr = INADDR_ANY;
+    bzero(&(serv_addr.sin_zero), 8);
+    inet_pton(AF_INET, clientIP, &(cli_addr.sin_addr.s_addr));
+
+    if (bind(sockfd, (struct sockaddr *)&serv_addr, sizeof(struct sockaddr)) < 0)
+        printf("ERROR on binding");
+
+    clilen = sizeof(struct sockaddr_in);
+
+    char message[MAX_MESSAGE_LEN] = "#";
+    strcat(message, MyIP);
+
+    while (1)
     {
-        if(tempClients[i] != NULL && newClient->client_id == tempClients[i]->client_id)
+        /* receive from socket */
+        n = recvfrom(sockfd, buf, 256, 0, (struct sockaddr *)&cli_addr, &clilen);
+        if (n < 0)
+            printf("ERROR on recvfrom");
+        printf("Received a datagram: %s\n", buf);
+
+        /* send to socket */
+        // n = sendto(sockfd, "Got your message\n", 17, 0, (struct sockaddr *)&cli_addr, sizeof(struct sockaddr));
+        // if (n < 0)
+        //     printf("ERROR on sendto");
+        
+        //Se a menssagem recebida for a de SERVER DISCOVERY
+        if(strcmp(buf, SERVER_DISCOVERY_MESSAGE) == 0)
         {
-            return;
+            //Responde ao novo cliente.
+            n = sendto(sockfd, message, MAX_MESSAGE_LEN, 0, (struct sockaddr *)&cli_addr, sizeof(struct sockaddr));
+            if (n < 0)
+                printf("ERROR on sendto");
+            else
+            {
+
+            }
         }
+    
     }
-	//lock clientListMutex
-	pthread_mutex_lock(&mutexClientList);
-	//add new client to list
-	//clients[currentClients] = *newClient;
-    memcpy(&clients[currentClients], &newClient, sizeof(CLIENT_INFO)*MAX_CLIENTS);
-	currentClients++;
-	//unlock clientListMutex
-	pthread_mutex_unlock(&mutexClientList);
+
+    close(sockfd);
+    return "a";
 }
 
-CLIENT_INFO* GetClientsVector()
+//Returns the new client Index (ID)
+int AddNewClient(struct sockaddr* cli_addr, int port)
 {
-    CLIENT_INFO* copyOfClients[MAX_CLIENTS];
+    char clientIP[INET_ADDRSTRLEN];
+    inet_ntop( AF_INET, &cli_addr, clientIP, INET_ADDRSTRLEN);
+
+    currentClients++;
+    int currentPort = (port+currentClients);
+    CLIENT_INFO* newClient = NewClientStruct(currentClients-1, clientIP, currentPort);
+    clients[currentClients] = *newClient;
+    printf("Added new client: %s:%d\n", clientIP, currentPort);
+
+    return currentClients-1;
+}
+
+void DefineServerIP(char* newServerIP, char* port)
+{
+    strcpy(ServerIP, newServerIP);
+    strcpy(ServerPort, port);
+}
+
+CLIENT_INFO *GetClientsVector()
+{
+    CLIENT_INFO *copyOfClients[MAX_CLIENTS];
     pthread_mutex_lock(&mutexClientList);
-    memcpy(&copyOfClients, &clients, sizeof(CLIENT_INFO)*MAX_CLIENTS);
+    memcpy(&copyOfClients, &clients, sizeof(CLIENT_INFO) * MAX_CLIENTS);
     pthread_mutex_unlock(&mutexClientList);
     return *copyOfClients;
 }
 
-CLIENT_INFO* NewClientStruct(int id) { 
-	CLIENT_INFO* p = malloc(sizeof(CLIENT_INFO));
-	p->client_id = id;
-	p->last_value = 0;
-	return p;
+CLIENT_INFO *NewClientStruct(int id, char* ip, int port)
+{
+    CLIENT_INFO *p = malloc(sizeof(CLIENT_INFO));
+    p->client_id = id;
+    p->last_value = 0;
+    strcpy(p->IP, ip);
+    p->port = port;
+    return p;
 }

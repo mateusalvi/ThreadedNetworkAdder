@@ -15,6 +15,7 @@ int main(int argc, char *argv[])
     {
         printf("1 for client, 2 for server\n");
         scanf("%d", &input);
+
         switch (input)
         {
         case 1:
@@ -25,6 +26,7 @@ int main(int argc, char *argv[])
             break;
         
         default:
+            printf("EXITING");
             break;
         }
     }
