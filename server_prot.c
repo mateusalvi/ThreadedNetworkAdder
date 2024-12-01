@@ -1,3 +1,10 @@
+/*##########################################################
+# INF01151 - Sistemas Operacionais II N - Turma A (2024/2) #
+#       Adilson Enio Pierog - Andres Grendene Pacheco      #
+#     Luís Filipe Martini Gastmann – Mateus Luiz Salvi     #
+##########################################################*/
+
+
 /*==============================================================================================================================
 	Se pesquisar "IMPLEMENTAR" neste arquivo ira destacar aonde tem as funcoes ainda a serem implementadas
 	Se pesquisar "CONFERIR" neste arquivo ira destacar aonde estao as duvidas de implementacao

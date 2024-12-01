@@ -1,7 +1,8 @@
 ############################################################
-# INF01151 - Sistemas Operacionais II N - Turma A (2024/1) #
-#                    Mateus Luiz Salvi                     #
-##########################################################*/
+# INF01151 - Sistemas Operacionais II N - Turma A (2024/2) #
+#       Adilson Enio Pierog - Andres Grendene Pacheco      #
+#     Luís Filipe Martini Gastmann – Mateus Luiz Salvi     #
+############################################################
 
 RunServer.o: RunClient.o RunServer.c discovery.h processing.h interface.h constants.h  server_prot.h
 	gcc RunServer.c -o RunServer  discovery.c processing.c interface.c  server_prot.c -lpthread

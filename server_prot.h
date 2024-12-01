@@ -1,6 +1,10 @@
 #ifndef _SERVERPROT_
 #define _SERVERPROT_
-
+/*##########################################################
+# INF01151 - Sistemas Operacionais II N - Turma A (2024/2) #
+#       Adilson Enio Pierog - Andres Grendene Pacheco      #
+#     Luís Filipe Martini Gastmann – Mateus Luiz Salvi     #
+##########################################################*/
 #include <pthread.h>
 #include <string.h>
 #include <stdio.h>
