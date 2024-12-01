@@ -7,6 +7,6 @@
 #include <math.h>
 
 
-void adder_implementation(char *string_in, int string_size, int *resultado, char *answer_to_client);
+void adder_implementation(int requestValue, int string_size, int *resultado, char *answer_to_client);
 
 #endif

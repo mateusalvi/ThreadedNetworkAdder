@@ -89,6 +89,10 @@ void RunClient()
     host_entry = gethostbyname(hostbuffer);
     IPbuffer = inet_ntoa(*((struct in_addr*) host_entry->h_addr_list[0]));
 
+    char menuBuffer = [255];
+    printf("Select an option\n1. For 255.255.255.255 broadcast\n2. Specify server adress\n")
+    scanf("%d", menuBuffer);
+
 
     int signalArg, inputArg;
 

@@ -30,7 +30,7 @@
 #define MAX_BUFFER 100
 #define MAX_CLIENTS 100
 #define BROADCAST_PORT 20000
-#define MAX_MESSAGE_LEN 100
+#define MAX_MESSAGE_LEN 256
 #define SERVER_DISCOVERY_MESSAGE "s#i#g#n#i#n"
 
 pthread_t threads[MAXTHREADS];

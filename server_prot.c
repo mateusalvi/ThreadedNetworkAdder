@@ -27,8 +27,8 @@
 pthread_mutex_t sumRequestMutex, mutex_op, mutex_op2;
 pthread_cond_t sumRequestQueueEmpty, sumRequestQueueFull, newClientsEmpty, newClientsFull;
 bool isRunning = false;
-int server_acc = 0; 
-int thread_num = 0; 
+int server_acc = 0;
+int thread_num = 0;
 int global_simple_id = 0;
 int count = 0, in = 0, out = 0;
 int buffer[MAX_BUFFER];
@@ -38,16 +38,20 @@ void *SumRequest_Producer(void *arg)
 {
 	// Casting CONFERIR
 	CLIENT_INFO *this_client = ((CLIENT_INFO *)arg);
-
+	static char returnMessage[MAX_MESSAGE_LEN];
 	while ((*this_client).is_connected != 0)
 	{
 		//-- sleep(rand()%5); --
 		pthread_mutex_lock(&sumRequestMutex);
 		while (count == MAX_BUFFER)
 			pthread_cond_wait(&sumRequestQueueEmpty, &sumRequestMutex);
-
 		// Alteracao 1 - Trocar a insercao por uma funcao A IMPLEMENTAR AINDA!!
-		client_input_value(&buffer[in]); // IMPLEMENTAR a funcao que fica aguardando (listening) o cliente enviar um valor
+		// client_input_value(&buffer[in]); // IMPLEMENTAR a funcao que fica aguardando (listening) o cliente enviar um valor
+
+		int request = ListenForAddRequest((*this_client).port, (*this_client).IP);
+
+		adder_implementation(request, 10, &buffer[in], returnMessage);
+		
 
 		count++;
 		printf("Client inseriu no buffer[%d] = %d\n", in, buffer[in]);
@@ -58,27 +62,30 @@ void *SumRequest_Producer(void *arg)
 		*/
 		while (pthread_mutex_trylock(&mutex_op2) != 0)
 		{
-			//DO NOTHING
+			// DO NOTHING
+			// wait_for_unlock(mutex_op2); // IMPLEMENTAR a funcao wait_for_unlock apenas para ficar ocioso (idle) ate liberar o mutex, pode ser apenas um loop com return (M: pra que?)
 		}
-		//wait_for_unlock(mutex_op2); // IMPLEMENTAR a funcao wait_for_unlock apenas para ficar ocioso (idle) ate liberar o mutex, pode ser apenas um loop com return
 
 		// Soma no acumulador e retorna ja no cliente o ultimo valor que ele recebeu, esta parte de retorno foi cortada do consumidor pois pode haver alteracoes na execucao
 		server_acc = server_acc + buffer[in];
 		(*this_client).last_value = server_acc;
 		pthread_mutex_unlock(&mutex_op2);
-
 		in = (in + 1) % MAX_BUFFER;
 		pthread_cond_signal(&sumRequestQueueFull);
 		pthread_mutex_unlock(&sumRequestMutex);
+
+		// SendMessage("I DID YOUR SUM!", (*this_client).IP, (*this_client).port, returnMessage, false);
 	}
 }
 
 void *AckSumRequest_Consumer(void *arg)
 {
 	// Conferir casting
-	CLIENT_INFO *temp_client = ((CLIENT_INFO *)arg);
-	while ((*temp_client).is_connected != 0)
+	CLIENT_INFO *this_client = ((CLIENT_INFO *)arg);
+
+	while ((*this_client).is_connected != 0)
 	{
+		static char returnMessage[MAX_MESSAGE_LEN] = "";
 		//-- sleep(rand()%5); --
 		pthread_mutex_lock(&sumRequestMutex);
 		while (count == 0)
@@ -86,7 +93,8 @@ void *AckSumRequest_Consumer(void *arg)
 		int my_task = buffer[out];
 		count--;
 		printf("Processando o valor do client buffer[%d] = %d\n", out, my_task);
-		return_value_to_client(server_acc); // TODO IMPLEMENTAR a funcao que retorna pro cliente //M: Já existe -> SendMessage(ip, porta, message)
+
+		SendMessage("I DID YOUR SUM!", (*this_client).IP, (*this_client).port, returnMessage, false); // TODO IMPLEMENTAR a funcao que retorna pro cliente //M: Já existe -> SendMessage(ip, porta, message)
 		out = (out + 1) % MAX_BUFFER;
 		pthread_cond_signal(&sumRequestQueueEmpty);
 		pthread_mutex_unlock(&sumRequestMutex);
@@ -106,35 +114,38 @@ static void *ClientHandlerThread(void *arg)
 	pid_t p1;
 	int request_number = 0;
 	pthread_t prod, cons;
-
+	void *null;
 	// Fazer o casting corretamente CONFERIR!!!!!
 	this_client = ((CLIENT_INFO *)arg);
-	
 	// Fazer um fork para um processo filho aguardar que o cliente disconecte
-	p1 = fork();
-	if (p1 == 0)
-	{
-		wait_disconnect(this_client); // IMPLEMENTAR funcao que vai alterar a variavel this_client.is_connected para 0 ou false se quiser mudar o tipo da variavel
-	}
-	else
-	{
-		// Algoritmo do produtor consumidor do moodle - adptado para mais um lock pra somar no acumulador - enquanto o cliente estiver conectado
-		while ((*this_client).is_connected != 0)
-		{
-			pthread_cond_init(&sumRequestQueueEmpty, NULL);
-			pthread_cond_init(&sumRequestQueueEmpty, NULL);
-			pthread_cond_init(&sumRequestQueueFull, NULL);
-			pthread_mutex_init(&sumRequestMutex, NULL);
-			pthread_mutex_init(&mutex_op2, NULL);
+	// p1 = fork();
+	// if (p1 == 0)
+	// {
+	// 	wait_disconnect(this_client); // IMPLEMENTAR funcao que vai alterar a variavel this_client.is_connected para 0 ou false se quiser mudar o tipo da variavel
+	// }
+	// else
+	// {
+	// Algoritmo do produtor consumidor do moodle - adptado para mais um lock pra somar no acumulador - enquanto o cliente estiver conectado
 
-			pthread_create(&prod, NULL, (void *)SumRequest_Producer, this_client);
-			pthread_create(&cons, NULL, (void *)AckSumRequest_Consumer, this_client);
-		}
-		pthread_exit(0);
+	while ((*this_client).is_connected != 0)
+	{
+		pthread_cond_init(&sumRequestQueueEmpty, NULL);
+		pthread_cond_init(&sumRequestQueueEmpty, NULL);
+		pthread_cond_init(&sumRequestQueueFull, NULL);
+		pthread_mutex_init(&sumRequestMutex, NULL);
+		pthread_mutex_init(&mutex_op2, NULL);
+
+		pthread_create(&prod, NULL, (void *)SumRequest_Producer, &(*this_client));
+		pthread_create(&cons, NULL, (void *)AckSumRequest_Consumer, &(*this_client));
+
+		pthread_join(prod, null);
+		pthread_join(cons, null);
 	}
+	pthread_exit(0);
+	// }
 }
 
-/*	
+/*
 Funcionamento do servidor:
 1 - Inicializacao  de variaveis
 2 - Fork para criar um processo que aguarda o encerramento do servidor (idle)
@@ -143,13 +154,13 @@ Funcionamento do servidor:
 4 - Criacao da thread para o cliente
 */
 
-void ServerMain(char* port)
+void ServerMain(char *port)
 {
 	int ret, ret2[MAX_CLIENTS];
 	pthread_t tinfo_process[MAX_CLIENTS];
 	int tinfo_id[MAX_CLIENTS];
 	int last_client;
-	
+
 	pthread_attr_t attr;
 	void *res;
 	pid_t p, p2;
@@ -181,17 +192,19 @@ void ServerMain(char* port)
 		{
 			while (isRunning != 0)
 			{
-				NetworkListenerSubprocess(port); //Start the P2 subprocess
-				thread_num++;
-				printf("Thread num %d \n", thread_num);
-				ret2[thread_num] = pthread_create(&tinfo_process[thread_num], &attr, &ClientHandlerThread, &clients[thread_num]);
-			// Criacao de uma thread por cliente, a funcao client thread vai tratar das solicitacoes de cada cliente
-			// }
-			// Encerramento do server e join das threads
-			}	
-			
+				CLIENT_INFO *newClient = ListenForNewClients(atoi(port)); // Start the P2 subprocess
+				if (newClient != NULL)
+				{
+					thread_num++;
+					printf("Thread num %d \n", thread_num);
+					ret2[thread_num] = pthread_create(&tinfo_process[thread_num], &attr, &ClientHandlerThread, &(*newClient));
+				}
+				// Criacao de uma thread por cliente, a funcao client thread vai tratar das solicitacoes de cada cliente
+				// }
+				// Encerramento do server e join das threads
+			}
 		}
-		else //Parent
+		else // Parent
 		{
 			// ret2[thread_num] = pthread_create(&tinfo_process[thread_num], &attr, &ClientHandlerThread, &clients[thread_num]);
 			// // Criacao de uma thread por cliente, a funcao client thread vai tratar das solicitacoes de cada cliente
@@ -219,31 +232,11 @@ void ServerMain(char* port)
 	exit(EXIT_SUCCESS);
 }
 
-void NetworkListenerSubprocess(char* port)
-{
-	bool waitingForNewClient = true;
-	char* clientIP = NULL;
-	//printf("PID É %ld PARENT É %ld \n", (long)getpid(), (long)getppid());
-	// do
-	// {
-	int currentClientIndex = RecieveDiscovery(atoi(port)); // IMPLEMENTAR a funcao que vai estabelecer a conexao entre um cliente e o servidor (WAIT_CONNECTION)
-
-	//TODO AQUI A GENTE TEM O INDEX NA LISTA DE CLIENTES DO NOSSO NOVO CLIENTE, AGORA PRECISAMOS INICIAR UMA THREAD QUE OUVE REQUESTS DELE.
-
-	// 	int a = strcmp(clientIP, NULL);
-	// 	if(a =! 0)
-	// 		waitingForNewClient = false;
-	// }
-	//while(waitingForNewClient);
-
-}
-
 int wait_closure()
 {
 	printf("Entered %s\n", __func__);
-	while(true)
+	while (true)
 	{
-
 	}
 	return 0;
 }
@@ -262,7 +255,7 @@ void client_input_value(int *buffer)
 
 void wait_for_unlock(pthread_mutex_t mutex_A)
 {
-	//printf("Entered %s\n", __func__);
+	// printf("Entered %s\n", __func__);
 
 	return;
 }
@@ -271,17 +264,4 @@ void wait_disconnect(CLIENT_INFO *this_client)
 {
 	printf("Entered %s\n", __func__);
 	return;
-}
-
-void RegisterNewClient(CLIENT_INFO *this_client)
-{
-	// pthread_t prod, cons;
-	
-	// pthread_cond_init(&newClientsEmpty, NULL);
-	// pthread_cond_init(&newClientsFull, NULL);
-	// pthread_mutex_init(&mutexClientList, NULL);
-	// AddNewClient(this_client);
-	// pthread_create(&prod, NULL, (void *)ClientHandlerThread, &this_client);
-	// //pthread_create(&cons, NULL, (void *)RegisterNewClient, this_client);
-	// return;
 }

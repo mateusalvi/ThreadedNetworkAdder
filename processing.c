@@ -8,12 +8,12 @@ DEVE SER ENCAIXADA NO LUGAR CERTO!!!! (eu nao me lembro onde era)
 
 #include "processing.h"
 
-void adder_implementation(char *string_in, int string_size, int *resultado, char *answer_to_client)
+void adder_implementation(int requestValue, int string_size, int *resultado, char *answer_to_client)
 {
 	int i, aux = (*resultado);
 
 	// Esta soma ja devolve o resultado porem sem formatacao em string
-	(*resultado) += atoi(string_in);
+	(*resultado) += requestValue;
 
 	// Formatacao em string do valor somado
 	for (i = 0; i < string_size; i++)

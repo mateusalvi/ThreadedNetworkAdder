@@ -11,6 +11,7 @@
 #include <ctype.h>
 #include "discovery.h"
 #include "constants.h"
+#include "processing.h"
 
 #define ID_BUFFER 32
 
@@ -50,7 +51,7 @@ void client_input_value(int *buffer);
 void wait_for_unlock(pthread_mutex_t mutex_A);
 void wait_disconnect(CLIENT_INFO *this_client);
 void RegisterNewClient(CLIENT_INFO *this_client);
-void NetworkListenerSubprocess(char* port);
+int NetworkListenerSubprocess(char* port);
 // void* AddNewClient(CLIENT_INFO *newClient);
 
 #endif
