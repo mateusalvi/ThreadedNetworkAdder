@@ -1,5 +1,5 @@
 
-/*	Devemos alterar o cdogio original para incluir a struct SERVER_DATA, e inicializar adequadamente com o 1º server sendo o lider
+/*	Devemos alterar o cdogio original para incluir a struct SERVER_DATA e se necessário a CONNECTION_DATA, e inicializar adequadamente com o 1º server sendo o lider
 e a cada server inicializado atualizar tanto qual é o lider e cadastrar um novo server na server_list.
 
 	PRECISA IMPLEMENTAR UMA FUNÇÃO PARA DETECTAR UM TIME_OUT ENTRE OS SERVERS !!!!!! 
@@ -22,6 +22,8 @@ pelo número aleatório podem existir duplicatas e devem ser tratadas, é mais s
 
 
 #define MAX_SERVERS 10
+#define SERVER_CONNECTION 0
+#DEFINE CLIENT_CONNECTION 1
 
 /* Necessario nao declara o vetor diretamente pois para descobrir o final da lista se checa (if nxt_server == NULL); */
 typedef struct server_info{
@@ -29,6 +31,10 @@ typedef struct server_info{
 	int	leader = 0; // Inicialização com 0 (false)
 	struct server_info* nxt_server = NULL, prv_server = NULL; // Inicialização com NULL
 } SERVER_DATA
+
+typedef struct connection_info{
+	int	connection_type;
+} CONNECTION_DATA
 
 //Incluir na main do servidor as declarações de ponteiros e a criação das variáveis SERVER_DATA
 SERVER_DATA* server_list;
