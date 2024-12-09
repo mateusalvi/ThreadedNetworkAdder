@@ -7,7 +7,8 @@ e a cada server inicializado atualizar tanto qual é o lider e cadastrar um novo
 	Uma ideia seria fazer um fork que fica checando o status dos outros servidores na inicialização do servidor parecido com o que foi 
 feito na etapa 1 para escutar os clientes, porem para isso é necessário haver um jeito de diferenciar a conexão de servidores entre si
 da conexão com um cliente. Podemos assumir que vão existir duas etapas de conexão, uma apenas com servidores e outra que abrirá o canal
-para clientes conectarem, mas isso é apenas uma ideia, se tiver uma ideia mais prática podem ignorar.
+para clientes conectarem, mas isso é apenas uma ideia. Outra possibilidade seria a 1ª mensagem de cada conexão possuir um token identificando
+que tipo de conexão é.
 
 	Para evitar que o algoritmo de bully seja rodado a cada time out, já possuímos a lista de servidores conectados ordenados crescentemente
 pelo id e quando o líder desconectar apenas buscamos o próximo server_id mais alto na server_list.
