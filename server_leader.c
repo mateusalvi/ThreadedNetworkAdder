@@ -39,6 +39,7 @@ typedef struct connection_info{
 //Incluir na main do servidor as declarações de ponteiros e a criação das variáveis SERVER_DATA
 SERVER_DATA* server_list;
 SERVER_DATA* new_server;
+SERVER_DATA** server_list_begin = &server_list;
 server_list = malloc(sizeof(SERVER_DATA));
 new_server = malloc(sizeof(SERVER_DATA));
 
