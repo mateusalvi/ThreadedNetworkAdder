@@ -46,7 +46,7 @@ void server_initializer( SERVER_DATA* new_server){
 	new_server.server_id = new_id;
 }
 
-/* Implementação de inclusçao de novo servidor em ordem CRESCENTE de id, e caso new_server.id seja maior ja torna o lider,
+/* Implementação de inclusao de novo servidor em ordem CRESCENTE de id, e caso new_server.id seja maior ja torna o lider,
 
 Entradas: ponteiro para a lista, ponteiro para o novo servidor, ponteiro do ponteiro para o começo a lista
 
