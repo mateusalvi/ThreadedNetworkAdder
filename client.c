@@ -43,8 +43,6 @@ void RunClient(int port)
     // To retrieve host information
     host_entry = gethostbyname(hostbuffer);
     IPbuffer = inet_ntoa(*((struct in_addr *)host_entry->h_addr_list[0]));
-    // 127.0.0.1 é o IP redundante, conexão da própria maquina com ela mesma.
-
 
     char menuBuffer[16];
     printf("Select an option\n1. For 255.255.255.255 broadcast\n2. Specify server adress\n");
