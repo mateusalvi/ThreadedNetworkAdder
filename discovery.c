@@ -133,6 +133,7 @@ void SendMessage(char *message, char *ip, int port, char *returnMessage, bool ex
     serv_addr.sin_addr = *((struct in_addr *)server->h_addr);
     bzero(&(serv_addr.sin_zero), 8);
     printf("Sending \"%s\" to \"%s:%d\"\n", message, ip, port);
+
     n = sendto(sockfd, message, strlen(message), 0, (const struct sockaddr *)&serv_addr, sizeof(struct sockaddr_in));
     if (n < 0)
     {
@@ -170,6 +171,19 @@ CLIENT_INFO *ListenForNewClients(int port)
 
     // Copy ip adress to MyIP constant
     inet_ntop(AF_INET, &serv_addr, MyIP, INET_ADDRSTRLEN);
+
+        int opt = 1;
+    if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, (char *)&opt, sizeof(opt))<0) 
+    {
+        perror("setsockopt");
+        exit(EXIT_FAILURE);
+    }
+    
+    if(setsockopt(sockfd, SOL_SOCKET, SO_REUSEPORT, (char *)&opt, sizeof(opt))<0)
+    {
+        perror("setsockopt");
+        exit(EXIT_FAILURE);
+    }
 
     if (bind(sockfd, (struct sockaddr *)&serv_addr, sizeof(struct sockaddr)) < 0)
         printf("ERROR on binding");
@@ -235,7 +249,7 @@ int ListenForAddRequest(int port, char *clientIP)
     inet_pton(AF_INET, clientIP, &(cli_addr.sin_addr.s_addr));
 
     if (bind(sockfd, (struct sockaddr *)&serv_addr, sizeof(struct sockaddr)) < 0)
-        printf("ERROR on binding");
+        printf("Error on binding\n");
 
     clilen = sizeof(struct sockaddr_in);
 

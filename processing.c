@@ -10,6 +10,7 @@ DEVE SER ENCAIXADA NO LUGAR CERTO!!!! (eu nao me lembro onde era)
 
 void adder_implementation(int requestValue, int string_size, int *resultado, char *answer_to_client)
 {
+
 	int i, aux = (*resultado);
 
 	// Esta soma ja devolve o resultado porem sem formatacao em string
@@ -25,4 +26,5 @@ void adder_implementation(int requestValue, int string_size, int *resultado, cha
 	// Forcar o '/0'
 	i++;
 	answer_to_client[i] = 0;
+	
 }

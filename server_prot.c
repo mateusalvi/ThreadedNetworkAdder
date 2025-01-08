@@ -46,6 +46,7 @@ void *SumRequest_Producer(void *arg)
 	// Casting CONFERIR
 	CLIENT_INFO *this_client = ((CLIENT_INFO *)arg);
 	static char returnMessage[MAX_MESSAGE_LEN];
+
 	while ((*this_client).is_connected != 0)
 	{
 		//-- sleep(rand()%5); --
@@ -57,7 +58,7 @@ void *SumRequest_Producer(void *arg)
 
 		int request = ListenForAddRequest((*this_client).port, (*this_client).IP);
 
-		adder_implementation(request, 10, &buffer[in], returnMessage);
+		//adder_implementation(request, 10, &buffer[in], returnMessage);
 		
 
 		count++;
@@ -76,11 +77,15 @@ void *SumRequest_Producer(void *arg)
 		// Soma no acumulador e retorna ja no cliente o ultimo valor que ele recebeu, esta parte de retorno foi cortada do consumidor pois pode haver alteracoes na execucao
 		server_acc = server_acc + buffer[in];
 		(*this_client).last_value = server_acc;
+		char message[256];
+		sprintf(message, "%d", server_acc);
 		pthread_mutex_unlock(&mutex_op2);
 		in = (in + 1) % MAX_BUFFER;
 		pthread_cond_signal(&sumRequestQueueFull);
 		pthread_mutex_unlock(&sumRequestMutex);
 
+		//SendMessage(message, this_client->IP, this_client->port, returnMessage, false);
+		SendMessage(message, this_client->IP, this_client->port, returnMessage, false);
 		// SendMessage("I DID YOUR SUM!", (*this_client).IP, (*this_client).port, returnMessage, false);
 	}
 }
