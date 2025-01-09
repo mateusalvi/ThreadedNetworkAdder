@@ -26,15 +26,13 @@ typedef struct client_data
 
 CLIENT_INFO *NewClientStruct(int id, char* ip, int port);
 
-pthread_mutex_t mutexClientList;
-
 char *GetBroadcastAdress();
 
 void SendMessage(char *message, char *ip, int port, char *returnMessage, bool expectReturn);
 
 CLIENT_INFO* ListenForNewClients(int port);
 
-CLIENT_INFO* AddNewClient(struct sockaddr* cli_addr, int port);
+CLIENT_INFO *AddNewClient(char* clientIP, int port);
 
 void StartClientListener(int currentClientIndex);
 
@@ -43,5 +41,7 @@ void AnswerNewClient(char* message, int sockfd, struct sockaddr* cli_addr);
 int ListenForAddRequest(int port, char* ip);
 
 CLIENT_INFO* GetClientsVector();
+
+void BroadcastSignIn(int port, char *returnMessage);
 
 #endif

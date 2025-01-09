@@ -40,6 +40,7 @@ int global_simple_id = 0;
 int count = 0, in = 0, out = 0;
 int buffer[MAX_BUFFER];
 char newClientPort;
+pthread_t threads[MAXTHREADS];
 
 void *SumRequest_Producer(void *arg)
 {
@@ -57,7 +58,7 @@ void *SumRequest_Producer(void *arg)
 		// client_input_value(&buffer[in]); // IMPLEMENTAR a funcao que fica aguardando (listening) o cliente enviar um valor
 
 		int request = ListenForAddRequest((*this_client).port, (*this_client).IP);
-
+		printf("AASDASDADAAAAAAAAAAAAAAAAAAAA");
 		//adder_implementation(request, 10, &buffer[in], returnMessage);
 		
 
@@ -83,10 +84,10 @@ void *SumRequest_Producer(void *arg)
 		in = (in + 1) % MAX_BUFFER;
 		pthread_cond_signal(&sumRequestQueueFull);
 		pthread_mutex_unlock(&sumRequestMutex);
-
+		printf("\n HELLO! \n ");
 		//SendMessage(message, this_client->IP, this_client->port, returnMessage, false);
-		SendMessage(message, this_client->IP, this_client->port, returnMessage, false);
-		// SendMessage("I DID YOUR SUM!", (*this_client).IP, (*this_client).port, returnMessage, false);
+		//SendMessage(message, this_client->IP, this_client->port, returnMessage, false);
+		//SendMessage("I DID YOUR SUM!", (*this_client).IP, (*this_client).port, returnMessage, false);
 	}
 }
 
@@ -108,6 +109,7 @@ void *AckSumRequest_Consumer(void *arg)
 
 		SendMessage("I DID YOUR SUM!", (*this_client).IP, (*this_client).port, returnMessage, false); // TODO IMPLEMENTAR a funcao que retorna pro cliente //M: Já existe -> SendMessage(ip, porta, message)
 		out = (out + 1) % MAX_BUFFER;
+
 		pthread_cond_signal(&sumRequestQueueEmpty);
 		pthread_mutex_unlock(&sumRequestMutex);
 	}

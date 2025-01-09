@@ -10,6 +10,7 @@
 int clientsCount = 0;
 char MyIP[INET_ADDRSTRLEN];
 CLIENT_INFO clients[MAX_CLIENTS];
+pthread_mutex_t mutexClientList;
 
 // Subnet mask getter, thanks to https://stackoverflow.com/questions/18100761/obtaining-subnetmask-in-c
 int get_addr_and_netmask_using_ifaddrs(const char *ifa_name, char *addr, char *netmask)
@@ -108,6 +109,46 @@ char *GetBroadcastAdress()
     return broadcast_addr;
 }
 
+void BroadcastSignIn(int port, char *returnMessage)
+{
+    int sockfd, n;
+	unsigned int length;
+	struct sockaddr_in serv_addr, from;
+	struct hostent *server;
+	
+	server = gethostbyname("172.26.63.255");
+	if (server == NULL) {
+        fprintf(stderr,"ERROR, no such host\n");
+        exit(0);
+    }	
+	
+	if ((sockfd = socket(AF_INET, SOCK_DGRAM, 0)) == -1)
+		printf("ERROR opening socket");
+	
+	serv_addr.sin_family = AF_INET;     
+	serv_addr.sin_port = htons(port);    
+	serv_addr.sin_addr = *((struct in_addr *)server->h_addr);
+	bzero(&(serv_addr.sin_zero), 8);  
+
+    char signInMessage[12] = SERVER_DISCOVERY_MESSAGE;
+    printf("SENDING MESSAGE: %s\n", signInMessage);
+	n = sendto(sockfd, signInMessage, strlen(signInMessage), 0, (const struct sockaddr *) &serv_addr, sizeof(struct sockaddr_in));
+	if (n < 0) 
+		printf("ERROR sendto");
+
+	char buffer[256];
+    bzero(buffer, 256);
+	fgets(buffer, 256, stdin);
+	length = sizeof(struct sockaddr_in);
+	n = recvfrom(sockfd, returnMessage, sizeof(returnMessage), 0, (struct sockaddr *) &from, &length);
+	if (n < 0)
+		printf("ERROR recvfrom");
+
+	printf("Got an ack: %s\n", buffer);
+	
+	close(sockfd);
+}
+
 void SendMessage(char *message, char *ip, int port, char *returnMessage, bool expectReturn)
 {
     int sockfd, n;
@@ -140,7 +181,7 @@ void SendMessage(char *message, char *ip, int port, char *returnMessage, bool ex
         printf("ERROR sendto\n");
         exit(EXIT_FAILURE);
     }
-    printf("Request \"%s\" sent\n", message);
+    printf("Message \"%s\" sent\n", message);
     if (expectReturn)
     {
         printf("Waiting for response...\n");
@@ -148,6 +189,7 @@ void SendMessage(char *message, char *ip, int port, char *returnMessage, bool ex
         n = recvfrom(sockfd, returnMessage, 256, 0, (struct sockaddr *)&from, &length);
         if (n < 0)
             printf("ERROR recvfrom ");
+        printf("Received a datagram: %s\n", returnMessage);
     }
 
     close(sockfd);
@@ -168,9 +210,9 @@ CLIENT_INFO *ListenForNewClients(int port)
     serv_addr.sin_port = htons(port);
     serv_addr.sin_addr.s_addr = INADDR_ANY;
     bzero(&(serv_addr.sin_zero), 8);
-
+    
     // Copy ip adress to MyIP constant
-    inet_ntop(AF_INET, &serv_addr, MyIP, INET_ADDRSTRLEN);
+    //inet_ntop(AF_INET, &serv_addr, MyIP, INET_ADDRSTRLEN);
 
         int opt = 1;
     if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, (char *)&opt, sizeof(opt))<0) 
@@ -186,14 +228,33 @@ CLIENT_INFO *ListenForNewClients(int port)
     }
 
     if (bind(sockfd, (struct sockaddr *)&serv_addr, sizeof(struct sockaddr)) < 0)
-        printf("ERROR on binding");
+        printf("ERROR on binding on ListenForClients");
 
     clilen = sizeof(struct sockaddr_in);
 
     // while (1)
     // {
     /* receive from socket */
+
+    char hostbuffer[256];
+    char *IPbuffer;
+    struct hostent *host_entry;
+    int hostname;
+
+    // To retrieve hostname
+    hostname = gethostname(hostbuffer, sizeof(hostbuffer));
+    // To retrieve host information
+    host_entry = gethostbyname(hostbuffer);
+    // To convert an Internet network
+    // address into ASCII string
+    IPbuffer = inet_ntoa(*((struct in_addr*)host_entry->h_addr_list[0]));
+
+    printf("Hostname: %s\n", hostbuffer);
+    strcpy(MyIP, IPbuffer);
+    printf("Host IP: %s\n", MyIP);
     printf("Listening for new clients...\n");
+
+    //printf("Listening for new clients...\n");
     n = recvfrom(sockfd, buf, MAX_MESSAGE_LEN, 0, (struct sockaddr *)&cli_addr, &clilen);
 
     if (n < 0)
@@ -216,6 +277,7 @@ CLIENT_INFO *ListenForNewClients(int port)
         if (sprintf(_port, "%d", port+1+clientsCount) < 0)
             printf("ERRO NO SPRINTF!\n");
         strcat(message, _port);
+
         // strcat(message, "\0");
         printf("Sending response: \"%s\"\n", message);
         // Responde ao novo cliente.
@@ -224,7 +286,9 @@ CLIENT_INFO *ListenForNewClients(int port)
             printf("ERROR on sendto");
         else
         {
-            newClient = AddNewClient((struct sockaddr *)&cli_addr, port);
+            char ip[16];
+            inet_ntop(AF_INET, &cli_addr.sin_addr, ip, sizeof(ip));
+            newClient = AddNewClient(ip, port);
         }
     }
 
@@ -247,9 +311,9 @@ int ListenForAddRequest(int port, char *clientIP)
     //serv_addr.sin_addr.s_addr = INADDR_ANY;
     bzero(&(serv_addr.sin_zero), 8);
     inet_pton(AF_INET, clientIP, &(cli_addr.sin_addr.s_addr));
-
+    printf("Truing to bind to %s:%d\n", clientIP, port);
     if (bind(sockfd, (struct sockaddr *)&serv_addr, sizeof(struct sockaddr)) < 0)
-        printf("Error on binding\n");
+        printf("Error on binding on listen for add request\n");
 
     clilen = sizeof(struct sockaddr_in);
 
@@ -282,11 +346,13 @@ int ListenForAddRequest(int port, char *clientIP)
 }
 
 // Returns the new client Index (ID)
-CLIENT_INFO *AddNewClient(struct sockaddr *cli_addr, int port)
+CLIENT_INFO *AddNewClient(char* clientIP, int port)
 {
-    char clientIP[INET_ADDRSTRLEN];
-    inet_ntop(AF_INET, &cli_addr, clientIP, INET_ADDRSTRLEN);
+    // char clientIP[INET_ADDRSTRLEN];
+    // inet_ntop(AF_INET, &cli_addr.sin_addr, clientIP, INET_ADDRSTRLEN);
 
+
+    
     clientsCount++;
     int currentPort = (port + clientsCount);
     memcpy(&clients[clientsCount], NewClientStruct(clientsCount - 1, clientIP, currentPort), sizeof(CLIENT_INFO));
@@ -305,7 +371,7 @@ CLIENT_INFO *GetClientsVector()
 {
     CLIENT_INFO *copyOfClients[MAX_CLIENTS];
     pthread_mutex_lock(&mutexClientList);
-    memcpy(&copyOfClients, &clients, sizeof(CLIENT_INFO) * MAX_CLIENTS);
+    memcpy(&copyOfClients, &clients, sizeof(copyOfClients));
     pthread_mutex_unlock(&mutexClientList);
     return *copyOfClients;
 }

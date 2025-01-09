@@ -4,7 +4,7 @@
 #     Luís Filipe Martini Gastmann – Mateus Luiz Salvi     #
 ##########################################################*/
 
-#include "server.h"
+#include "old_server.h"
 
 int sendMessageLock = 0;
 

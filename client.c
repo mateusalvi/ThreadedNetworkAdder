@@ -45,17 +45,20 @@ void RunClient(int port)
     IPbuffer = inet_ntoa(*((struct in_addr *)host_entry->h_addr_list[0]));
 
     char menuBuffer[16];
-    printf("Select an option\n1. For 255.255.255.255 broadcast\n2. Specify server adress\n");
+    char menuIpBuffer[16];
+    printf("Select an option \n1. For 255.255.255.255 broadcast \n2. Specify server adress \n3. Broadcast using teacher's method and 255.255.255.255 ip\n");
     scanf("%s", menuBuffer);
 
     if(strcmp(menuBuffer, "1") == 0)
         SendMessage(SERVER_DISCOVERY_MESSAGE, "255.255.255.255", port, returnMessage, 1);
-    else 
+    else if(strcmp(menuBuffer, "2") == 0) 
     {
         printf("Specify the server IP adress: \n");
-        scanf("%s", menuBuffer);
-        SendMessage(SERVER_DISCOVERY_MESSAGE, menuBuffer, port, returnMessage, 1);
+        scanf("%s", menuIpBuffer);
+        SendMessage(SERVER_DISCOVERY_MESSAGE, menuIpBuffer, port, returnMessage, 1);
     }
+    else if(strcmp(menuBuffer, "3") == 0)
+        BroadcastSignIn(port, returnMessage);
     
     printf("Message recieved: \"%s\" \n", returnMessage);
 
@@ -65,7 +68,10 @@ void RunClient(int port)
         char *token = strtok(returnMessage, "#");
 
         //printf("Token: %s\n", token);
-        memcpy(ServerIP, token, strlen(token) * sizeof(char) + 1);
+        if(strcmp(menuBuffer, "2") == 0)
+            strcpy(ServerIP, menuIpBuffer);
+        else
+            memcpy(ServerIP, token, strlen(token) * sizeof(char) + 1);
         token = strtok(NULL, "#");
         //printf("Token: %s\n", token);
         memcpy(ServerPort, token, strlen(token) * sizeof(char));
@@ -78,7 +84,7 @@ void RunClient(int port)
             bzero(buffer, 256);
             // fgets(buffer, 256, stdin);
             scanf("%s", buffer);
-            SendMessage(buffer, "127.0.0.1", atoi(ServerPort), buffer, 1);
+            SendMessage(buffer, ServerIP, atoi(ServerPort), buffer, 1);
         }
     }
 }

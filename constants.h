@@ -34,8 +34,6 @@
 #define MAX_MESSAGE_LEN 256
 #define SERVER_DISCOVERY_MESSAGE "s#i#g#n#i#n"
 
-pthread_t threads[MAXTHREADS];
-
 enum THREADS
 {
     THREAD_CLIENT_INPUT,
