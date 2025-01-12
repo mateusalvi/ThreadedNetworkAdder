@@ -7,7 +7,7 @@
 #include "client.h"
 
 char ServerIP[INET_ADDRSTRLEN];
-char ServerPort[4];
+char ServerPort[5];
 
 void *ClientInputSubprocess()
 {
@@ -46,7 +46,7 @@ void RunClient(int port)
 
     char menuBuffer[16];
     char menuIpBuffer[16];
-    printf("Select an option \n1. For 255.255.255.255 broadcast \n2. Specify server adress \n3. Broadcast using teacher's method and 255.255.255.255 ip\n");
+    printf("Select an option \n1. For 255.255.255.255 broadcast with generic send message \n2. Specify server adress for connection \n3. Broadcast using teacher's method and current network broadcast adress\n");
     scanf("%s", menuBuffer);
 
     if(strcmp(menuBuffer, "1") == 0)

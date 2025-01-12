@@ -19,6 +19,7 @@ typedef struct client_data
 	int client_simple_id;
 	int client_received_value[MAX_BUFFER];
 	int is_connected;
+	int newRequestValue;
 	char IP[INET_ADDRSTRLEN];
 	int port;
 	int last_value;
@@ -43,5 +44,7 @@ int ListenForAddRequest(int port, char* ip);
 CLIENT_INFO* GetClientsVector();
 
 void BroadcastSignIn(int port, char *returnMessage);
+
+void *addRequestListenerThread(void *arg);
 
 #endif

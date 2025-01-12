@@ -41,54 +41,67 @@ int count = 0, in = 0, out = 0;
 int buffer[MAX_BUFFER];
 char newClientPort;
 pthread_t threads[MAXTHREADS];
+pthread_t addListenerThreads[MAX_CLIENTS];
 
 void *SumRequest_Producer(void *arg)
 {
 	// Casting CONFERIR
 	CLIENT_INFO *this_client = ((CLIENT_INFO *)arg);
 	static char returnMessage[MAX_MESSAGE_LEN];
+	pthread_t addListenerThread;
+	this_client->newRequestValue = 0;
 
-	while ((*this_client).is_connected != 0)
+	pthread_create(&addListenerThread, NULL, (void *)addRequestListenerThread, &(*this_client));
+
+	while ((*this_client).is_connected == 1)
 	{
-		//-- sleep(rand()%5); --
-		pthread_mutex_lock(&sumRequestMutex);
-		while (count == MAX_BUFFER)
-			pthread_cond_wait(&sumRequestQueueEmpty, &sumRequestMutex);
-		// Alteracao 1 - Trocar a insercao por uma funcao A IMPLEMENTAR AINDA!!
-		// client_input_value(&buffer[in]); // IMPLEMENTAR a funcao que fica aguardando (listening) o cliente enviar um valor
-
-		int request = ListenForAddRequest((*this_client).port, (*this_client).IP);
-		printf("AASDASDADAAAAAAAAAAAAAAAAAAAA");
-		//adder_implementation(request, 10, &buffer[in], returnMessage);
-		
-
-		count++;
-		printf("Client inseriu no buffer[%d] = %d\n", in, buffer[in]);
-
-		/*
-			Alteracao 2 - Lockar um mutex para a soma no acumulador do servidor
-			A funcao pthread_mutex_trylock(&mutex_op2) tenta lockar um mutex, retorna 0 se deu tudo certo, -1 se algum erro
-		*/
-		while (pthread_mutex_trylock(&mutex_op2) != 0)
+		if(this_client->newRequestValue != 0)
 		{
-			// DO NOTHING
-			// wait_for_unlock(mutex_op2); // IMPLEMENTAR a funcao wait_for_unlock apenas para ficar ocioso (idle) ate liberar o mutex, pode ser apenas um loop com return (M: pra que?)
-		}
+			printf("CURRENT NEW REQUEST: %d\n", this_client->newRequestValue);
+			char message[256];
+			//sleep(rand()%5); 
+			pthread_mutex_lock(&sumRequestMutex);
+			while (count == MAX_BUFFER)
+				pthread_cond_wait(&sumRequestQueueEmpty, &sumRequestMutex);
+			// Alteracao 1 - Trocar a insercao por uma funcao A IMPLEMENTAR AINDA!!
+			// client_input_value(&buffer[in]); // IMPLEMENTAR a funcao que fica aguardando (listening) o cliente enviar um valor
 
-		// Soma no acumulador e retorna ja no cliente o ultimo valor que ele recebeu, esta parte de retorno foi cortada do consumidor pois pode haver alteracoes na execucao
-		server_acc = server_acc + buffer[in];
-		(*this_client).last_value = server_acc;
-		char message[256];
-		sprintf(message, "%d", server_acc);
-		pthread_mutex_unlock(&mutex_op2);
-		in = (in + 1) % MAX_BUFFER;
-		pthread_cond_signal(&sumRequestQueueFull);
-		pthread_mutex_unlock(&sumRequestMutex);
-		printf("\n HELLO! \n ");
-		//SendMessage(message, this_client->IP, this_client->port, returnMessage, false);
-		//SendMessage(message, this_client->IP, this_client->port, returnMessage, false);
-		//SendMessage("I DID YOUR SUM!", (*this_client).IP, (*this_client).port, returnMessage, false);
+			//Pré-threadded listener method:
+			//int request = ListenForAddRequest((*this_client).port, (*this_client).IP);
+
+			printf("Client inseriu no buffer[%d] = %d\n", in, buffer[in]);
+			adder_implementation(this_client->newRequestValue, 10, &buffer[in], returnMessage);
+
+			count++;
+
+			/*
+				Alteracao 2 - Lockar um mutex para a soma no acumulador do servidor
+				A funcao pthread_mutex_trylock(&mutex_op2) tenta lockar um mutex, retorna 0 se deu tudo certo, -1 se algum erro
+			*/
+			while (pthread_mutex_trylock(&mutex_op2) != 0)
+			{
+				// DO NOTHING
+				// wait_for_unlock(mutex_op2); // IMPLEMENTAR a funcao wait_for_unlock apenas para ficar ocioso (idle) ate liberar o mutex, pode ser apenas um loop com return (M: pra que?)
+			}
+
+			// Soma no acumulador e retorna ja no cliente o ultimo valor que ele recebeu, esta parte de retorno foi cortada do consumidor pois pode haver alteracoes na execucao
+			server_acc = server_acc + buffer[in];
+			(*this_client).last_value = server_acc;
+			
+			sprintf(message, "%d", server_acc);
+			pthread_mutex_unlock(&mutex_op2);
+			
+			in = (in + 1) % MAX_BUFFER;
+			this_client->newRequestValue = 0;
+
+			pthread_cond_signal(&sumRequestQueueFull);
+			pthread_mutex_unlock(&sumRequestMutex);
+
+			printf("----Leaving sum critical zone! \n ");
+		}
 	}
+
+	pthread_join(addListenerThread, NULL);
 }
 
 void *AckSumRequest_Consumer(void *arg)
@@ -98,17 +111,19 @@ void *AckSumRequest_Consumer(void *arg)
 
 	while ((*this_client).is_connected != 0)
 	{
-		static char returnMessage[MAX_MESSAGE_LEN] = "";
+		static char returnMessage[MAX_MESSAGE_LEN];
 		//-- sleep(rand()%5); --
 		pthread_mutex_lock(&sumRequestMutex);
 		while (count == 0)
+		{
 			pthread_cond_wait(&sumRequestQueueFull, &sumRequestMutex);
+		}
 		int my_task = buffer[out];
 		count--;
-		printf("Processando o valor do client buffer[%d] = %d\n", out, my_task);
+		printf("Processing client response of buffer[%d] = %d\n", out, my_task);
 
-		SendMessage("I DID YOUR SUM!", (*this_client).IP, (*this_client).port, returnMessage, false); // TODO IMPLEMENTAR a funcao que retorna pro cliente //M: Já existe -> SendMessage(ip, porta, message)
 		out = (out + 1) % MAX_BUFFER;
+		SendMessage("(ACK) I DID YOUR SUM!", (*this_client).IP, (*this_client).port, returnMessage, false); // TODO IMPLEMENTAR a funcao que retorna pro cliente //M: Já existe -> SendMessage(ip, porta, message)
 
 		pthread_cond_signal(&sumRequestQueueEmpty);
 		pthread_mutex_unlock(&sumRequestMutex);
