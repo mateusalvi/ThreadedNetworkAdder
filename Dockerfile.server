@@ -1,0 +1,18 @@
+# Use an official base image
+FROM ubuntu:latest
+
+# Install necessary packages
+RUN apt update && apt install -y gcc
+
+# Set the working directory in the container
+WORKDIR /app
+
+# Copy the C file to the container
+COPY discovery.h processing.h constants.h server_prot.h  /app/
+COPY RunServer.c discovery.c processing.c server_prot.c  /app/
+
+# Compile the C program
+RUN gcc RunServer.c -o RunServer discovery.c processing.c server_prot.c -lpthread
+
+# Use ENTRYPOINT to allow passing arguments
+ENTRYPOINT ["./RunServer"]

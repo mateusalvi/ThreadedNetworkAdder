@@ -79,22 +79,22 @@ void RunClient(int port)
 
 ///----------------------------------------
 
-        int sockfd, n;
-        socklen_t clilen;
-        struct sockaddr_in serv_addr, cli_addr;
-        char buf[MAX_MESSAGE_LEN] = "";
-        CLIENT_INFO *newClient = NULL;
+        // int sockfd, n;
+        // socklen_t clilen;
+        // struct sockaddr_in serv_addr, cli_addr;
+        // char buf[MAX_MESSAGE_LEN] = "";
+        // CLIENT_INFO *newClient = NULL;
 
-        if ((sockfd = socket(AF_INET, SOCK_DGRAM, 0)) == -1)
-            printf("ERROR opening socket");
+        // if ((sockfd = socket(AF_INET, SOCK_DGRAM, 0)) == -1)
+        //     printf("ERROR opening socket");
 
-        serv_addr.sin_family = AF_INET;
-        serv_addr.sin_port = htons(atoi(ServerPort));
-        serv_addr.sin_addr.s_addr = INADDR_ANY;
-        bzero(&(serv_addr.sin_zero), 8);
+        // serv_addr.sin_family = AF_INET;
+        // serv_addr.sin_port = htons(atoi(ServerPort));
+        // serv_addr.sin_addr.s_addr = INADDR_ANY;
+        // bzero(&(serv_addr.sin_zero), 8);
         
-        if (bind(sockfd, (struct sockaddr *)&serv_addr, sizeof(struct sockaddr)) < 0)
-            printf("ERROR on binding on ListenForClients");
+        // if (bind(sockfd, (struct sockaddr *)&serv_addr, sizeof(struct sockaddr)) < 0)
+        //     printf("ERROR on binding on ListenForClients");
 
 ///---------------------------------------
         // Consume input file
@@ -106,12 +106,12 @@ void RunClient(int port)
             scanf("%s", buffer);
             printf("Server IP: %s:%s(string) or %d(int)\n", ServerIP, ServerPort, atoi(ServerPort));
             SendMessage(buffer, menuIpBuffer, atoi(ServerPort), buffer, 1);
-            n = recvfrom(sockfd, buf, MAX_MESSAGE_LEN, 0, (struct sockaddr *)&cli_addr, &clilen);
-            if (n < 0)
-                printf("ERROR on recvfrom");
-            printf("Received a datagram: %s\n", buf);
+            //n = recvfrom(sockfd, buf, MAX_MESSAGE_LEN, 0, (struct sockaddr *)&cli_addr, &clilen);
+            // if (n < 0)
+            //     printf("ERROR on recvfrom");
+            printf("Received a datagram: %s\n", buffer);
         }
     
-        close(sockfd);
+        //close(sockfd);
     }
 }
