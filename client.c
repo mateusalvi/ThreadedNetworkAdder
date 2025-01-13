@@ -6,8 +6,7 @@
 
 #include "client.h"
 
-char ServerIP[INET_ADDRSTRLEN];
-char ServerPort[256];
+
 
 void *ClientInputSubprocess()
 {
@@ -37,6 +36,8 @@ void RunClient(int port)
     struct hostent *host_entry;
     int hostname;
     static char returnMessage[MAX_MESSAGE_LEN];
+    char ServerIP[INET_ADDRSTRLEN];
+    char ServerPort[256];
 
     // To retrieve hostname
     hostname = gethostname(hostbuffer, sizeof(hostbuffer));
@@ -74,9 +75,8 @@ void RunClient(int port)
             memcpy(ServerIP, token, strlen(token) * sizeof(char) + 1);
         token = strtok(NULL, "#");
         printf("Token: %s\n", token);
-        memcpy(ServerPort, token, strlen(token) * sizeof(char));
+        memcpy(ServerPort, token, strlen(token) * sizeof(char) + 1);
 
-        printf("Server IP: %s:%s(string) or %d(int)\n", ServerIP, ServerPort, atoi(ServerPort));
         // Consume input file
         while (1)
         {
@@ -84,6 +84,7 @@ void RunClient(int port)
             bzero(buffer, 256);
             // fgets(buffer, 256, stdin);
             scanf("%s", buffer);
+            printf("Server IP: %s:%s(string) or %d(int)\n", ServerIP, ServerPort, atoi(ServerPort));
             SendMessage(buffer, ServerIP, atoi(ServerPort), buffer, 1);
         }
     }

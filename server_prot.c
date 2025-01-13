@@ -108,7 +108,8 @@ void *AckSumRequest_Consumer(void *arg)
 {
 	// Conferir casting
 	CLIENT_INFO *this_client = ((CLIENT_INFO *)arg);
-
+	
+	char message[256];
 	while ((*this_client).is_connected != 0)
 	{
 		static char returnMessage[MAX_MESSAGE_LEN];
@@ -121,9 +122,10 @@ void *AckSumRequest_Consumer(void *arg)
 		int my_task = buffer[out];
 		count--;
 		printf("Processing client response of buffer[%d] = %d\n", out, my_task);
-
+		
 		out = (out + 1) % MAX_BUFFER;
-		SendMessage("(ACK) I DID YOUR SUM!", (*this_client).IP, (*this_client).port, returnMessage, false); // TODO IMPLEMENTAR a funcao que retorna pro cliente //M: Já existe -> SendMessage(ip, porta, message)
+		sprintf(message, "%d", server_acc);
+		SendMessage(message, (*this_client).IP, (*this_client).port, returnMessage, false); // TODO IMPLEMENTAR a funcao que retorna pro cliente //M: Já existe -> SendMessage(ip, porta, message)
 
 		pthread_cond_signal(&sumRequestQueueEmpty);
 		pthread_mutex_unlock(&sumRequestMutex);
