@@ -121,7 +121,6 @@ int begin_election(int leader_id, int socket_leader, SERVER_DATA* server_list){
 	int i = 0;
 	
 	aux.server_id = 0
-	sux.joined = 0;
 	aux.nxt = candidatos;
 	while(1){
 		if(!is_leader_alive(leader_id,socket_leader)){
