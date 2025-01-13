@@ -156,7 +156,7 @@ void SendMessage(char *message, char *ip, int port, char *returnMessage, bool ex
     unsigned int length;
     struct sockaddr_in serv_addr, from;
     struct hostent *server;
-
+    printf("\n\nCLIENT PORT IS: %d\n\n", port);
     // if (argc < 2) {
     // 	fprintf(stderr, "usage %s hostname\n", argv[0]);
     // 	exit(0);
