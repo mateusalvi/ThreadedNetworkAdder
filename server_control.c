@@ -131,4 +131,6 @@ int first_conn = 1;
 		fork(); // Assim como nos servers, um fork para escutar
 		is_new_server_bigger(new_server,server_list);
 		is_leader_alive(leader.id,leader.socket);
-		
+		if(!is_leader_alive) leader = begin_election(leader.id,leader.socket,server_list);
+	}
+}
