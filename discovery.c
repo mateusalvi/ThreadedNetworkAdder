@@ -365,7 +365,7 @@ void *addRequestListenerThread(void *arg)
     CLIENT_INFO* thisClient = ((CLIENT_INFO *)arg);
     int sockfd, n;
     socklen_t clilen;
-    struct sockaddr_in serv_addr;
+    struct sockaddr_in serv_addr, cli_addr;
     char buf[256];
     if ((sockfd = socket(AF_INET, SOCK_DGRAM, 0)) == -1)
         printf("ERROR opening socket");
@@ -373,20 +373,20 @@ void *addRequestListenerThread(void *arg)
     serv_addr.sin_family = AF_INET;
     serv_addr.sin_port = htons(thisClient->port);
     bzero(&(serv_addr.sin_zero), 8);
-    inet_pton(AF_INET, thisClient->IP, &(serv_addr.sin_addr.s_addr));
+    inet_pton(AF_INET, thisClient->IP, &(cli_addr.sin_addr.s_addr));
 
-    // int opt = 1;
-    // if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, (char *)&opt, sizeof(opt))<0) 
-    // {
-    //     perror("setsockopt");
-    //     exit(EXIT_FAILURE);
-    // }
+    int opt = 1;
+    if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, (char *)&opt, sizeof(opt))<0) 
+    {
+        perror("setsockopt");
+        exit(EXIT_FAILURE);
+    }
     
-    // if(setsockopt(sockfd, SOL_SOCKET, SO_REUSEPORT, (char *)&opt, sizeof(opt))<0)
-    // {
-    //     perror("setsockopt");
-    //     exit(EXIT_FAILURE);
-    // }
+    if(setsockopt(sockfd, SOL_SOCKET, SO_REUSEPORT, (char *)&opt, sizeof(opt))<0)
+    {
+        perror("setsockopt");
+        exit(EXIT_FAILURE);
+    }
 
     if (bind(sockfd, (struct sockaddr *)&serv_addr, sizeof(struct sockaddr)) < 0)
         printf("Error on binding at listen for add request method\n");
@@ -399,7 +399,7 @@ void *addRequestListenerThread(void *arg)
     {
         bzero(buf, sizeof(buf));
         printf("Listening for requests from %s:%d \n", thisClient->IP, thisClient->port);
-        n = recvfrom(sockfd, buf, 256, 0, (struct sockaddr *)&serv_addr, &clilen);
+        n = recvfrom(sockfd, buf, 256, 0, (struct sockaddr *)&cli_addr, &clilen);
         if (n < 0)
             printf("ERROR on recvfrom");
         printf("Received a request from %s:%d of +%s\n", thisClient->IP, thisClient->port, buf);
