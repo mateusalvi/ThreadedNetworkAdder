@@ -415,9 +415,8 @@ CLIENT_INFO *AddNewClient(char* clientIP, int port)
     // char clientIP[INET_ADDRSTRLEN];
     // inet_ntop(AF_INET, &cli_addr.sin_addr, clientIP, INET_ADDRSTRLEN);
     clientsCount++;
-    int currentPort = (port + clientsCount);
-    memcpy(&clients[clientsCount], NewClientStruct(clientsCount - 1, clientIP, currentPort), sizeof(CLIENT_INFO));
-    printf("Added new client: %s:%d\n", clientIP, currentPort);
+    memcpy(&clients[clientsCount], NewClientStruct(clientsCount - 1, clientIP, port), sizeof(CLIENT_INFO));
+    printf("Added new client: %s:%d\n", clientIP, port);
 
     return &clients[clientsCount];
 }
