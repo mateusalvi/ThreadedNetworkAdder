@@ -77,6 +77,26 @@ void RunClient(int port)
         //printf("Current Token: %s\n", token);
         memcpy(ServerPort, token, strlen(token) * sizeof(char) + 1);
 
+///----------------------------------------
+
+        int sockfd, n;
+        socklen_t clilen;
+        struct sockaddr_in serv_addr, cli_addr;
+        char buf[MAX_MESSAGE_LEN] = "";
+        CLIENT_INFO *newClient = NULL;
+
+        if ((sockfd = socket(AF_INET, SOCK_DGRAM, 0)) == -1)
+            printf("ERROR opening socket");
+
+        serv_addr.sin_family = AF_INET;
+        serv_addr.sin_port = htons(atoi(ServerPort));
+        serv_addr.sin_addr.s_addr = INADDR_ANY;
+        bzero(&(serv_addr.sin_zero), 8);
+        
+        if (bind(sockfd, (struct sockaddr *)&serv_addr, sizeof(struct sockaddr)) < 0)
+            printf("ERROR on binding on ListenForClients");
+
+///---------------------------------------
         // Consume input file
         while (1)
         {
@@ -85,7 +105,13 @@ void RunClient(int port)
             // fgets(buffer, 256, stdin);
             scanf("%s", buffer);
             printf("Server IP: %s:%s(string) or %d(int)\n", ServerIP, ServerPort, atoi(ServerPort));
-            SendMessage(buffer, ServerIP, atoi(ServerPort), buffer, 1);
+            SendMessage(buffer, menuIpBuffer, atoi(ServerPort), buffer, 1);
+            n = recvfrom(sockfd, buf, MAX_MESSAGE_LEN, 0, (struct sockaddr *)&cli_addr, &clilen);
+                if (n < 0)
+            printf("ERROR on recvfrom");
+            printf("Received a datagram: %s\n", buf);
         }
+    
+        close(sockfd);
     }
 }
