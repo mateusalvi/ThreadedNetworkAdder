@@ -7,7 +7,7 @@
 #include "client.h"
 
 char ServerIP[INET_ADDRSTRLEN];
-char ServerPort[5];
+char ServerPort[256];
 
 void *ClientInputSubprocess()
 {
@@ -73,10 +73,10 @@ void RunClient(int port)
         else
             memcpy(ServerIP, token, strlen(token) * sizeof(char) + 1);
         token = strtok(NULL, "#");
-        //printf("Token: %s\n", token);
+        printf("Token: %s\n", token);
         memcpy(ServerPort, token, strlen(token) * sizeof(char));
 
-        printf("Server IP: %s:%s\n", ServerIP, ServerPort);
+        printf("Server IP: %s:%s(string) or %d(int)\n", ServerIP, ServerPort, atoi(ServerPort));
         // Consume input file
         while (1)
         {

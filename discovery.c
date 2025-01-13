@@ -175,7 +175,7 @@ void SendMessage(char *message, char *ip, int port, char *returnMessage, bool ex
     serv_addr.sin_addr = *((struct in_addr *)server->h_addr);
     bzero(&(serv_addr.sin_zero), 8);
 
-    printf("Sending \"%s\" to \"%s:%d with hostname \"%s\"\n", message, ip, port, server->h_name);
+    printf("Sending \"%s\" to \"%s:%d with hostname \"%s\"\n", message, ip, serv_addr.sin_port, server->h_name);
     n = sendto(sockfd, message, strlen(message), 0, (const struct sockaddr *)&serv_addr, sizeof(struct sockaddr_in));
     if (n < 0)
     {
@@ -185,7 +185,7 @@ void SendMessage(char *message, char *ip, int port, char *returnMessage, bool ex
     printf("Message \"%s\" sent\n", message);
     if (expectReturn)
     {
-        printf("Waiting for response...\n");
+        printf("Waiting for response from %s:%d...\n", server->h_name, serv_addr.sin_port);
         length = sizeof(struct sockaddr_in);
         n = recvfrom(sockfd, returnMessage, 256, 0, (struct sockaddr *)&serv_addr, &length);
         if (n < 0)
