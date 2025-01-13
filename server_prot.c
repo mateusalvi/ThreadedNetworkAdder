@@ -125,7 +125,7 @@ void *AckSumRequest_Consumer(void *arg)
 		
 		out = (out + 1) % MAX_BUFFER;
 		sprintf(message, "%d", server_acc);
-		SendMessage(message, (*this_client).IP, (*this_client).port, returnMessage, false); // TODO IMPLEMENTAR a funcao que retorna pro cliente //M: Já existe -> SendMessage(ip, porta, message)
+		SendMessage(message, this_client->IP, this_client->port, returnMessage, false); // TODO IMPLEMENTAR a funcao que retorna pro cliente //M: Já existe -> SendMessage(ip, porta, message)
 
 		pthread_cond_signal(&sumRequestQueueEmpty);
 		pthread_mutex_unlock(&sumRequestMutex);

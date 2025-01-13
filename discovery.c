@@ -187,7 +187,7 @@ void SendMessage(char *message, char *ip, int port, char *returnMessage, bool ex
     {
         printf("Waiting for response from %s:%d...\n", server->h_name, serv_addr.sin_port);
         length = sizeof(struct sockaddr_in);
-        n = recvfrom(sockfd, returnMessage, 256, 0, (struct sockaddr *)&serv_addr, &length);
+        n = recvfrom(sockfd, returnMessage, 256, 0, (struct sockaddr *)&from, &length);
         if (n < 0)
             printf("ERROR recvfrom ");
         printf("Received a datagram: %s\n", returnMessage);
