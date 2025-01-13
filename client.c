@@ -107,8 +107,8 @@ void RunClient(int port)
             printf("Server IP: %s:%s(string) or %d(int)\n", ServerIP, ServerPort, atoi(ServerPort));
             SendMessage(buffer, menuIpBuffer, atoi(ServerPort), buffer, 1);
             n = recvfrom(sockfd, buf, MAX_MESSAGE_LEN, 0, (struct sockaddr *)&cli_addr, &clilen);
-                if (n < 0)
-            printf("ERROR on recvfrom");
+            if (n < 0)
+                printf("ERROR on recvfrom");
             printf("Received a datagram: %s\n", buf);
         }
     

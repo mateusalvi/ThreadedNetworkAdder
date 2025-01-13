@@ -271,7 +271,7 @@ CLIENT_INFO *ListenForNewClients(int port)
     if (strcmp(buf, SERVER_DISCOVERY_MESSAGE) == 0)
     {
         char message[MAX_MESSAGE_LEN] = "";
-        char _port[4];
+        char _port[5];
         strcat(message, "#");
         strcat(message, MyIP);
         strcat(message, "#");
@@ -289,7 +289,7 @@ CLIENT_INFO *ListenForNewClients(int port)
         {
             char ip[16];
             inet_ntop(AF_INET, &cli_addr.sin_addr, ip, sizeof(ip));
-            newClient = AddNewClient(ip, port);
+            newClient = AddNewClient(ip, port+1+clientsCount);
         }
     }
 
