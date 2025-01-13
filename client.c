@@ -37,7 +37,7 @@ void RunClient(int port)
     int hostname;
     static char returnMessage[MAX_MESSAGE_LEN];
     char ServerIP[INET_ADDRSTRLEN];
-    char ServerPort[256];
+    char* ServerPort = malloc(sizeof(char)*256);
 
     // To retrieve hostname
     hostname = gethostname(hostbuffer, sizeof(hostbuffer));
@@ -74,7 +74,7 @@ void RunClient(int port)
         else
             memcpy(ServerIP, token, strlen(token) * sizeof(char) + 1);
         token = strtok(NULL, "#");
-        printf("Token: %s\n", token);
+        //printf("Current Token: %s\n", token);
         memcpy(ServerPort, token, strlen(token) * sizeof(char) + 1);
 
         // Consume input file

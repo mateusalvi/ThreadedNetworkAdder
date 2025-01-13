@@ -373,7 +373,7 @@ void *addRequestListenerThread(void *arg)
     serv_addr.sin_family = AF_INET;
     serv_addr.sin_port = htons(thisClient->port);
     bzero(&(serv_addr.sin_zero), 8);
-    inet_pton(AF_INET, thisClient->IP, &(cli_addr.sin_addr.s_addr));
+    inet_pton(AF_INET, thisClient->IP, &(serv_addr.sin_addr.s_addr));
 
     int opt = 1;
     if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, (char *)&opt, sizeof(opt))<0) 
@@ -399,7 +399,7 @@ void *addRequestListenerThread(void *arg)
     {
         bzero(buf, sizeof(buf));
         printf("Listening for requests from %s:%d \n", thisClient->IP, thisClient->port);
-        n = recvfrom(sockfd, buf, 256, 0, (struct sockaddr *)&cli_addr, &clilen);
+        n = recvfrom(sockfd, buf, 256, 0, (struct sockaddr *)&serv_addr, &clilen);
         if (n < 0)
             printf("ERROR on recvfrom");
         printf("Received a request from %s:%d of +%s\n", thisClient->IP, thisClient->port, buf);
