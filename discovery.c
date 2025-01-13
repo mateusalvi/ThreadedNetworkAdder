@@ -156,7 +156,7 @@ void SendMessage(char *message, char *ip, int port, char *returnMessage, bool ex
     unsigned int length;
     struct sockaddr_in serv_addr, from;
     struct hostent *server;
-    printf("\n\nCLIENT PORT IS: %d\n\n", port);
+
     // if (argc < 2) {
     // 	fprintf(stderr, "usage %s hostname\n", argv[0]);
     // 	exit(0);
@@ -365,7 +365,7 @@ void *addRequestListenerThread(void *arg)
     CLIENT_INFO* thisClient = ((CLIENT_INFO *)arg);
     int sockfd, n;
     socklen_t clilen;
-    struct sockaddr_in serv_addr, cli_addr;
+    struct sockaddr_in serv_addr;
     char buf[256];
     if ((sockfd = socket(AF_INET, SOCK_DGRAM, 0)) == -1)
         printf("ERROR opening socket");
@@ -375,18 +375,18 @@ void *addRequestListenerThread(void *arg)
     bzero(&(serv_addr.sin_zero), 8);
     inet_pton(AF_INET, thisClient->IP, &(serv_addr.sin_addr.s_addr));
 
-    int opt = 1;
-    if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, (char *)&opt, sizeof(opt))<0) 
-    {
-        perror("setsockopt");
-        exit(EXIT_FAILURE);
-    }
+    // int opt = 1;
+    // if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, (char *)&opt, sizeof(opt))<0) 
+    // {
+    //     perror("setsockopt");
+    //     exit(EXIT_FAILURE);
+    // }
     
-    if(setsockopt(sockfd, SOL_SOCKET, SO_REUSEPORT, (char *)&opt, sizeof(opt))<0)
-    {
-        perror("setsockopt");
-        exit(EXIT_FAILURE);
-    }
+    // if(setsockopt(sockfd, SOL_SOCKET, SO_REUSEPORT, (char *)&opt, sizeof(opt))<0)
+    // {
+    //     perror("setsockopt");
+    //     exit(EXIT_FAILURE);
+    // }
 
     if (bind(sockfd, (struct sockaddr *)&serv_addr, sizeof(struct sockaddr)) < 0)
         printf("Error on binding at listen for add request method\n");
