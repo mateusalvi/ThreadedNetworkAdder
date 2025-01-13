@@ -154,7 +154,7 @@ void SendMessage(char *message, char *ip, int port, char *returnMessage, bool ex
 {
     int sockfd, n;
     unsigned int length;
-    struct sockaddr_in serv_addr, from;
+    struct sockaddr_in dest_Addr, from;
     struct hostent *server;
 
     // if (argc < 2) {
@@ -170,13 +170,13 @@ void SendMessage(char *message, char *ip, int port, char *returnMessage, bool ex
 
     if ((sockfd = socket(AF_INET, SOCK_DGRAM, 0)) == -1)
         printf("ERROR opening socket\n");
-    serv_addr.sin_family = AF_INET;
-    serv_addr.sin_port = htons(port);
-    serv_addr.sin_addr = *((struct in_addr *)server->h_addr);
-    bzero(&(serv_addr.sin_zero), 8);
+    dest_Addr.sin_family = AF_INET;
+    dest_Addr.sin_port = htons(port);
+    dest_Addr.sin_addr = *((struct in_addr *)server->h_addr);
+    bzero(&(dest_Addr.sin_zero), 8);
 
-    printf("Sending \"%s\" to \"%s:%d with hostname \"%s\"\n", message, ip, serv_addr.sin_port, server->h_name);
-    n = sendto(sockfd, message, strlen(message), 0, (const struct sockaddr *)&serv_addr, sizeof(struct sockaddr_in));
+    printf("Sending \"%s\" to \"%s:%d with hostname \"%s\"\n", message, ip, dest_Addr.sin_port, server->h_name);
+    n = sendto(sockfd, message, strlen(message), 0, (const struct sockaddr *)&dest_Addr, sizeof(struct sockaddr_in));
     if (n < 0)
     {
         printf("ERROR sendto\n");
@@ -185,7 +185,7 @@ void SendMessage(char *message, char *ip, int port, char *returnMessage, bool ex
     printf("Message \"%s\" sent\n", message);
     if (expectReturn)
     {
-        printf("Waiting for response from %s:%d...\n", server->h_name, serv_addr.sin_port);
+        printf("Waiting for response from %s:%d...\n", server->h_name, dest_Addr.sin_port);
         length = sizeof(struct sockaddr_in);
         n = recvfrom(sockfd, returnMessage, 256, 0, (struct sockaddr *)&from, &length);
         if (n < 0)
