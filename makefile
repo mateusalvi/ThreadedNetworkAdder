@@ -40,7 +40,7 @@ docker_server:
 run_client: docker_client
 	docker run --rm -it --name $(CLIENT_CONTAINER_NAME) $(CLIENT_IMAGE_NAME) $(ARGS)
 run_server: docker_server
-	docker run -it --name $(SERVER_CONTAINER_NAME) $(SERVER_IMAGE_NAME) $(ARGS)
+	docker run --rm -it --name $(SERVER_CONTAINER_NAME) $(SERVER_IMAGE_NAME) $(ARGS)
 
 run_client_rands2: docker_client
 	docker run --rm -i --name $(CLIENT_CONTAINER_NAME) $(CLIENT_IMAGE_NAME) $(ARGS) < rand2
