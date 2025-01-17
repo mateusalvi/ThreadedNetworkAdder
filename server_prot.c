@@ -4,295 +4,298 @@
 #     Luís Filipe Martini Gastmann – Mateus Luiz Salvi     #
 ##########################################################*/
 
-
-/*==============================================================================================================================
-	Se pesquisar "IMPLEMENTAR" neste arquivo ira destacar aonde tem as funcoes ainda a serem implementadas
-	Se pesquisar "CONFERIR" neste arquivo ira destacar aonde estao as duvidas de implementacao
-
-	Este programa junta 2 programas disponiveis no moodle, o "Algoritmo de Lamport - Algoritmo da Padaria"
-	e tambem o "Exemplo 3 - POSIX variaveis de condicao" para atender as especificações do trabalho.
-
-	Do "Algoritmo de Lamport" foi utilizado principalmente a parte de criacao e join de threads, ignorando a parte do
-	"Algoritmo da padaria".
-	Do "Exemplo 3" foi utilizado principalmente a estrutura do "Produtor Consumidor", acrescentando uma nova secao
-	critica no produtor para nao haver inconsistencias na execucao (ver o codigo abaixo).
-
-	As partes comentadas entre "--" sao trechos do codigo original do moodle.
-
-	O arquivo "server_prot.h" possui o cabecalho das funcoes a serem implementadas e tambem as structs utilizadas,
-	podendo realizar alteracoes se necessario ou conforme for a implementacao desejada.
-
-	Eu disponibilizei as structs que eu utilizei nesta implementacao as structs como comentarios para facilitar
-	a compreensao.
-
-	No meio do codigo possuem comentarios para ajudar a guiar a compreensao de trechos especificos, e daonde
-	eu fiz alteracoes no codigo original
-===================================================================================================================================*/
-
 #include "server_prot.h"
+#include "discovery.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <unistd.h>
+#include <pthread.h>
+#include <errno.h>
 
-pthread_mutex_t sumRequestMutex, mutex_op, mutex_op2;
-pthread_cond_t sumRequestQueueEmpty, sumRequestQueueFull, newClientsEmpty, newClientsFull;
-bool isRunning = false;
-int server_acc = 0;
-int thread_num = 0;
-int global_simple_id = 0;
-int count = 0, in = 0, out = 0;
-int buffer[MAX_BUFFER];
-char newClientPort;
-pthread_t threads[MAXTHREADS];
-pthread_t addListenerThreads[MAX_CLIENTS];
+// Variáveis globais
+static int total_sum = 0;
+pthread_mutex_t sum_mutex = PTHREAD_MUTEX_INITIALIZER;
 
-void *SumRequest_Producer(void *arg)
-{
-	// Casting CONFERIR
-	CLIENT_INFO *this_client = ((CLIENT_INFO *)arg);
-	static char returnMessage[MAX_MESSAGE_LEN];
-	pthread_t addListenerThread;
-	this_client->newRequestValue = 0;
+int receive_and_decode_message(int sockfd, packet *received_packet, struct sockaddr_in *client_addr) {
+    socklen_t client_len = sizeof(struct sockaddr_in);
 
-	pthread_create(&addListenerThread, NULL, (void *)addRequestListenerThread, &(*this_client));
+    // Recebe a mensagem
+    int n = recvfrom(sockfd, received_packet, sizeof(packet), 0,
+                     (struct sockaddr *)client_addr, &client_len);
 
-	while ((*this_client).is_connected == 1)
-	{
-		if(this_client->newRequestValue != 0)
-		{
-			printf("CURRENT NEW REQUEST: %d\n", this_client->newRequestValue);
-			char message[256];
-			//sleep(rand()%5); 
-			pthread_mutex_lock(&sumRequestMutex);
-			while (count == MAX_BUFFER)
-				pthread_cond_wait(&sumRequestQueueEmpty, &sumRequestMutex);
-			// Alteracao 1 - Trocar a insercao por uma funcao A IMPLEMENTAR AINDA!!
-			// client_input_value(&buffer[in]); // IMPLEMENTAR a funcao que fica aguardando (listening) o cliente enviar um valor
+    if (n < 0) {
+        if (errno != EAGAIN && errno != EWOULDBLOCK) {
+            perror("ERROR receiving message");
+        }
+        return -1;
+    }
 
-			//Pré-threadded listener method:
-			//int request = ListenForAddRequest((*this_client).port, (*this_client).IP);
+    if (n != sizeof(packet)) {
+        printf("Received incomplete packet: %d bytes\n", n);
+        return -1;
+    }
 
-			printf("Client inseriu no buffer[%d] = %d\n", in, buffer[in]);
-			adder_implementation(this_client->newRequestValue, 10, &buffer[in], returnMessage);
+    // Decodifica e valida o pacote
+    printf("Received packet from %s:%d - ", 
+           inet_ntoa(client_addr->sin_addr), ntohs(client_addr->sin_port));
 
-			count++;
+    if (received_packet->type == REQ) {
+        printf("type=REQ, seqn=%lld, value=%d\n",
+               received_packet->data.req.seqn,
+               received_packet->data.req.value);
+    } else if (received_packet->type == DESC) {
+        printf("type=DESC, seqn=%lld, value=%d\n",
+               received_packet->data.req.seqn,
+               received_packet->data.req.value);
+    } else {
+        printf("invalid type=%d\n", received_packet->type);
+        return -1;
+    }
 
-			/*
-				Alteracao 2 - Lockar um mutex para a soma no acumulador do servidor
-				A funcao pthread_mutex_trylock(&mutex_op2) tenta lockar um mutex, retorna 0 se deu tudo certo, -1 se algum erro
-			*/
-			while (pthread_mutex_trylock(&mutex_op2) != 0)
-			{
-				// DO NOTHING
-				// wait_for_unlock(mutex_op2); // IMPLEMENTAR a funcao wait_for_unlock apenas para ficar ocioso (idle) ate liberar o mutex, pode ser apenas um loop com return (M: pra que?)
-			}
-
-			// Soma no acumulador e retorna ja no cliente o ultimo valor que ele recebeu, esta parte de retorno foi cortada do consumidor pois pode haver alteracoes na execucao
-			server_acc = server_acc + buffer[in];
-			(*this_client).last_value = server_acc;
-			
-			sprintf(message, "%d", server_acc);
-			pthread_mutex_unlock(&mutex_op2);
-			
-			in = (in + 1) % MAX_BUFFER;
-			this_client->newRequestValue = 0;
-
-			pthread_cond_signal(&sumRequestQueueFull);
-			pthread_mutex_unlock(&sumRequestMutex);
-
-			printf("----Leaving sum critical zone! \n ");
-		}
-	}
-
-	pthread_join(addListenerThread, NULL);
+    return n;
 }
 
-void *AckSumRequest_Consumer(void *arg)
-{
-	// Conferir casting
-	CLIENT_INFO *this_client = ((CLIENT_INFO *)arg);
-	
-	char message[256];
-	while ((*this_client).is_connected != 0)
-	{
-		static char returnMessage[MAX_MESSAGE_LEN];
-		//-- sleep(rand()%5); --
-		pthread_mutex_lock(&sumRequestMutex);
-		while (count == 0)
-		{
-			pthread_cond_wait(&sumRequestQueueFull, &sumRequestMutex);
-		}
-		int my_task = buffer[out];
-		count--;
-		printf("Processing client response of buffer[%d] = %d\n", out, my_task);
-		
-		out = (out + 1) % MAX_BUFFER;
-		sprintf(message, "%d", server_acc);
-		SendMessage(message, this_client->IP, this_client->port, returnMessage, false); // TODO IMPLEMENTAR a funcao que retorna pro cliente //M: Já existe -> SendMessage(ip, porta, message)
+void discovery_service(int port) {
+    int sockfd;
+    struct sockaddr_in server_addr, client_addr;
+    packet received_packet, response_packet;
 
-		pthread_cond_signal(&sumRequestQueueEmpty);
-		pthread_mutex_unlock(&sumRequestMutex);
-	}
+    printf("Starting discovery service on port %d...\n", port);
+
+    // Cria o socket
+    sockfd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (sockfd < 0) {
+        perror("ERROR opening socket");
+        return;
+    }
+
+    // Configura opções do socket
+    int opt = 1;
+    if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0) {
+        perror("ERROR setting socket options");
+        close(sockfd);
+        return;
+    }
+
+    // Configura timeout do socket
+    struct timeval tv;
+    tv.tv_sec = 0;
+    tv.tv_usec = SOCKET_TIMEOUT_MS * 1000;  // Converte para microssegundos
+    if (setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) < 0) {
+        perror("ERROR setting timeout");
+        close(sockfd);
+        return;
+    }
+
+    // Configura o endereço do servidor
+    memset(&server_addr, 0, sizeof(server_addr));
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_addr.s_addr = INADDR_ANY;
+    server_addr.sin_port = htons(port);
+
+    // Faz o bind do socket
+    if (bind(sockfd, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
+        perror("ERROR on binding");
+        close(sockfd);
+        return;
+    }
+
+    printf("Discovery service listening on port %d...\n", port);
+
+    while (1) {
+        // Recebe e decodifica a mensagem
+        if (receive_and_decode_message(sockfd, &received_packet, &client_addr) >= 0) {
+            printf("Discovery service: Processing packet from %s:%d\n",
+                   inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
+
+            if (received_packet.type == DESC) {
+                printf("Discovery service: Received DESC packet\n");
+
+                // Prepara a resposta
+                response_packet.type = DESC_ACK;
+                response_packet.data.resp.seqn = received_packet.data.req.seqn;
+                response_packet.data.resp.value = port + 1;  // Retorna a porta do serviço de requisições
+                response_packet.data.resp.status = 0;    // Sucesso
+
+                printf("Discovery service: Sending DESC_ACK with request port %d\n", port + 1);
+
+                // Envia a resposta
+                int n = sendto(sockfd, &response_packet, sizeof(response_packet), 0,
+                             (struct sockaddr *)&client_addr, sizeof(client_addr));
+                if (n < 0) {
+                    perror("ERROR sending discovery response");
+                } else if (n != sizeof(response_packet)) {
+                    printf("Discovery service: Sent incomplete packet: %d bytes\n", n);
+                } else {
+                    printf("Discovery service: Response sent successfully\n");
+                }
+            } else {
+                printf("Discovery service: Received invalid packet type: %d\n", received_packet.type);
+            }
+        }
+        usleep(100000);  // Evita consumo excessivo de CPU (100ms)
+    }
+
+    close(sockfd);
 }
 
-/*
-1 thread = 1 client conectado
-Recebe no *arg um CLIENT_INFO
-Faz o casting <CONFERIR!!!>
-Cria um fork para ficar "listening"
-Encerra quando o cliente desconecta
-*/
-static void *ClientHandlerThread(void *arg)
-{
-	CLIENT_INFO *this_client;
-	pid_t p1;
-	int request_number = 0;
-	pthread_t prod, cons;
-	void *null;
-	// Fazer o casting corretamente CONFERIR!!!!!
-	this_client = ((CLIENT_INFO *)arg);
-	// Fazer um fork para um processo filho aguardar que o cliente disconecte
-	// p1 = fork();
-	// if (p1 == 0)
-	// {
-	// 	wait_disconnect(this_client); // IMPLEMENTAR funcao que vai alterar a variavel this_client.is_connected para 0 ou false se quiser mudar o tipo da variavel
-	// }
-	// else
-	// {
-	// Algoritmo do produtor consumidor do moodle - adptado para mais um lock pra somar no acumulador - enquanto o cliente estiver conectado
+void request_service(int port) {
+    int sockfd;
+    struct sockaddr_in server_addr, client_addr;
+    socklen_t client_len = sizeof(client_addr);
+    packet received_packet;
 
-	while ((*this_client).is_connected != 0)
-	{
-		pthread_cond_init(&sumRequestQueueEmpty, NULL);
-		pthread_cond_init(&sumRequestQueueEmpty, NULL);
-		pthread_cond_init(&sumRequestQueueFull, NULL);
-		pthread_mutex_init(&sumRequestMutex, NULL);
-		pthread_mutex_init(&mutex_op2, NULL);
+    printf("Starting request service on port %d...\n", port);
 
-		pthread_create(&prod, NULL, (void *)SumRequest_Producer, &(*this_client));
-		pthread_create(&cons, NULL, (void *)AckSumRequest_Consumer, &(*this_client));
+    // Cria o socket
+    sockfd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (sockfd < 0) {
+        perror("ERROR opening socket");
+        return;
+    }
 
-		pthread_join(prod, null);
-		pthread_join(cons, null);
-	}
-	pthread_exit(0);
-	// }
+    // Configura opções do socket
+    int opt = 1;
+    if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0) {
+        perror("ERROR setting socket options");
+        close(sockfd);
+        return;
+    }
+
+    // Configura timeout do socket
+    struct timeval tv;
+    tv.tv_sec = 0;
+    tv.tv_usec = SOCKET_TIMEOUT_MS * 1000;  // Converte para microssegundos
+    if (setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) < 0) {
+        perror("ERROR setting timeout");
+        close(sockfd);
+        return;
+    }
+
+    // Configura o endereço do servidor
+    memset(&server_addr, 0, sizeof(server_addr));
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_addr.s_addr = INADDR_ANY;
+    server_addr.sin_port = htons(port);
+
+    // Faz o bind do socket
+    if (bind(sockfd, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
+        perror("ERROR on binding");
+        close(sockfd);
+        return;
+    }
+
+    printf("Request service listening on port %d...\n", port);
+
+    while (1) {
+        // Recebe e decodifica a mensagem
+        if (receive_and_decode_message(sockfd, &received_packet, &client_addr) >= 0) {
+            printf("Request service: Processing packet from %s:%d\n",
+                   inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
+
+            // Processa a mensagem recebida
+            if (received_packet.type == REQ) {
+                printf("Request service: Received REQ packet with seqn=%lld, value=%d\n",
+                       received_packet.data.req.seqn, received_packet.data.req.value);
+
+                // Se é um pacote de teste (valor 0), apenas responde com ACK
+                if (received_packet.data.req.value == 0) {
+                    packet response_packet;
+                    response_packet.type = REQ_ACK;
+                    response_packet.data.resp.seqn = received_packet.data.req.seqn;
+                    response_packet.data.resp.value = 0;
+                    response_packet.data.resp.status = 0;
+
+                    printf("Request service: Sending test response\n");
+
+                    int n = sendto(sockfd, &response_packet, sizeof(response_packet), 0,
+                                 (struct sockaddr *)&client_addr, sizeof(client_addr));
+                    if (n < 0) {
+                        perror("ERROR sending test response");
+                    } else if (n != sizeof(response_packet)) {
+                        printf("Request service: Sent incomplete test response: %d bytes\n", n);
+                    } else {
+                        printf("Request service: Test response sent successfully\n");
+                    }
+                } else {
+                    // Atualiza a soma total
+                    pthread_mutex_lock(&sum_mutex);
+                    total_sum += received_packet.data.req.value;
+                    pthread_mutex_unlock(&sum_mutex);
+
+                    // Envia resposta com a soma atual
+                    packet response_packet;
+                    response_packet.type = REQ_ACK;
+                    response_packet.data.resp.seqn = received_packet.data.req.seqn;
+                    response_packet.data.resp.value = total_sum;
+                    response_packet.data.resp.status = 0;
+
+                    printf("Request service: Sending REQ_ACK with total_sum %d\n", total_sum);
+
+                    int n = sendto(sockfd, &response_packet, sizeof(response_packet), 0,
+                                 (struct sockaddr *)&client_addr, sizeof(client_addr));
+                    if (n < 0) {
+                        perror("ERROR sending response");
+                    } else if (n != sizeof(response_packet)) {
+                        printf("Request service: Sent incomplete packet: %d bytes\n", n);
+                    } else {
+                        printf("Request service: Response sent successfully\n");
+                    }
+                }
+            } else {
+                printf("Request service: Received invalid packet type: %d\n", received_packet.type);
+            }
+        }
+        usleep(100000);  // Evita consumo excessivo de CPU (100ms)
+    }
+
+    close(sockfd);
 }
 
-/*
-Funcionamento do servidor:
-1 - Inicializacao  de variaveis
-2 - Fork para criar um processo que aguarda o encerramento do servidor (idle)
-3 - Fork para criar um processo que aguarda conexoes com clientes (idle)
-	->Ao atingir a conexao ele pega os dados do cliente e incrementa o indice do buffer
-4 - Criacao da thread para o cliente
-*/
-
-void ServerMain(char *port)
-{
-	int ret, ret2[MAX_CLIENTS];
-	pthread_t tinfo_process[MAX_CLIENTS];
-	int tinfo_id[MAX_CLIENTS];
-	int last_client;
-
-	pthread_attr_t attr;
-	void *res;
-	pid_t p, p2;
-
-	// Inicializacao de variaveis - CONFERIR SE TA PEGANDO A PORTA DE MANEIRA CERTA
-	// strtok(*argv, " "); // Mateus: ??
-	// int porta = strtok(NULL, " ");
-	// printf(porta);
-
-	printf("A porta de acesso eh %s \n", port);
-	isRunning = true;
-	ret = pthread_attr_init(&attr);
-
-	for (int i = 0; i < MAX_CLIENTS; i++)
-		ret2[i] = pthread_attr_init(&attr);
-
-	// Criacao de um processo filho para aguardar o encerramento do servidor
-	p = fork();
-	if (p == 0)
-	{
-		while (isRunning != false)
-			isRunning = wait_closure(); // IMPLEMENTAR a funcao que vai mudar o server_running para 0 ou false se quiser mudar o tipo da variavel
-	}
-	else
-	{
-		// Criacao de um fork para ficar aguardando conexoes com os clients, criando um novo client
-		p2 = fork();
-		if (p2 == 0)
-		{
-			while (isRunning != 0)
-			{
-				CLIENT_INFO *newClient = ListenForNewClients(atoi(port)); // Start the P2 subprocess
-				if (newClient != NULL)
-				{
-					thread_num++;
-					printf("Thread num %d \n", thread_num);
-					ret2[thread_num] = pthread_create(&tinfo_process[thread_num], &attr, &ClientHandlerThread, &(*newClient));
-				}
-				// Criacao de uma thread por cliente, a funcao client thread vai tratar das solicitacoes de cada cliente
-				// }
-				// Encerramento do server e join das threads
-			}
-		}
-		else // Parent
-		{
-			// ret2[thread_num] = pthread_create(&tinfo_process[thread_num], &attr, &ClientHandlerThread, &clients[thread_num]);
-			// // Criacao de uma thread por cliente, a funcao client thread vai tratar das solicitacoes de cada cliente
-			// // }
-			// // Encerramento do server e join das threads
-
-			ret = pthread_attr_destroy(&attr);
-
-			last_client = thread_num;
-			for (thread_num = 0; thread_num < last_client; thread_num++)
-			{
-				ret = pthread_join(tinfo_process[thread_num], &res);
-				printf("Joined with thread id %d\n", thread_num);
-				free(res);
-			}
-
-			while (isRunning)
-			{
-				/* KEEP THE PARENT PROCESS ALIVE */
-			}
-		}
-	}
-
-	printf("You should not be reading this message.");
-	exit(EXIT_SUCCESS);
+void *discovery_thread(void *arg) {
+    discovery_service(*((int *)arg));
+    return NULL;
 }
 
-int wait_closure()
-{
-	printf("Entered %s\n", __func__);
-	while (true)
-	{
-	}
-	return 0;
+void *request_thread(void *arg) {
+    request_service(*((int *)arg));
+    return NULL;
 }
 
-void return_value_to_client(int value)
-{
-	printf("Entered %s\n", __func__);
-	return;
+void start_server(int port) {
+    pthread_t disc_thread, req_thread;
+    int disc_port = port;
+    int req_port = port + 1;
+
+    // Inicia o serviço de descoberta em uma thread
+    if (pthread_create(&disc_thread, NULL, discovery_thread, &disc_port) != 0) {
+        perror("ERROR creating discovery thread");
+        return;
+    }
+
+    // Inicia o serviço de requisições em outra thread
+    if (pthread_create(&req_thread, NULL, request_thread, &req_port) != 0) {
+        perror("ERROR creating request thread");
+        return;
+    }
+
+    // Aguarda as threads terminarem (não deve acontecer normalmente)
+    pthread_join(disc_thread, NULL);
+    pthread_join(req_thread, NULL);
+
+    // Limpa os recursos
+    pthread_mutex_destroy(&sum_mutex);
 }
 
-void client_input_value(int *buffer)
-{
-	printf("Entered %s\n", __func__);
-	return;
-}
-
-void wait_for_unlock(pthread_mutex_t mutex_A)
-{
-	// printf("Entered %s\n", __func__);
-
-	return;
-}
-
-void wait_disconnect(CLIENT_INFO *this_client)
-{
-	printf("Entered %s\n", __func__);
-	return;
+void ServerMain(const char* port) {
+    int port_num = atoi(port);
+    if (port_num <= 0) {
+        fprintf(stderr, "Invalid port number\n");
+        return;
+    }
+    start_server(port_num);
 }

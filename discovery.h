@@ -1,50 +1,36 @@
-#ifndef _DISCOVERY_
-#define _DISCOVERY_
+#ifndef DISCOVERY_H
+#define DISCOVERY_H
 
-/*##########################################################
-# INF01151 - Sistemas Operacionais II N - Turma A (2024/2) #
-#       Adilson Enio Pierog - Andres Grendene Pacheco      #
-#     Luís Filipe Martini Gastmann – Mateus Luiz Salvi     #
-##########################################################*/
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <stdbool.h>
+#include <errno.h>
+#include "server_prot.h"
 
-#include "constants.h"
+#define MAX_MESSAGE_LEN 256
+#define MAX_CLIENTS 10
 
-typedef struct client_data
-{
-	int client_id;
-	//REQUEST_INFO request[MAX_BUFFER];
-	// Aqui foi apenas uma ideia para nao ter de trabalhar com o endereco MAC podemos
-	// fazer uma funcao que gere um id simplificado, mas se quiserem trabalhar com o
-	// id completo tem de adaptar o codigo para trabalhar com strings
-	int client_simple_id;
-	int client_received_value[MAX_BUFFER];
-	int is_connected;
-	int newRequestValue;
-	char IP[INET_ADDRSTRLEN];
-	int port;
-	int last_value;
+// Estrutura para armazenar informações do cliente
+typedef struct {
+    int id;
+    char ip[INET_ADDRSTRLEN];
+    int port;
 } CLIENT_INFO;
 
-CLIENT_INFO *NewClientStruct(int id, char* ip, int port);
-
-char *GetBroadcastAdress();
-
-void SendMessage(char *message, char *ip, int port, char *returnMessage, bool expectReturn);
-
-CLIENT_INFO* ListenForNewClients(int port);
-
-CLIENT_INFO *AddNewClient(char* clientIP, int port);
-
-void StartClientListener(int currentClientIndex);
-
-void AnswerNewClient(char* message, int sockfd, struct sockaddr* cli_addr);
-
-int ListenForAddRequest(int port, char* ip);
-
-CLIENT_INFO* GetClientsVector();
-
+// Funções de descoberta
 void BroadcastSignIn(int port, char *returnMessage);
+void ListenForNewClients(int port);
+int ListenForAddRequest(int port, char *clientIP);
+void SendMessage(char *message, char *ip, int port, char *returnMessage, bool expectReturn);
+bool TestServerConnection(const char *ip, int port);
 
-void *addRequestListenerThread(void *arg);
+// Funções auxiliares
+CLIENT_INFO NewClientStruct(int id, char *ip, int port);
 
-#endif
+#endif // DISCOVERY_H

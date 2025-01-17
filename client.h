@@ -7,12 +7,23 @@
 #     Luís Filipe Martini Gastmann – Mateus Luiz Salvi     #
 ##########################################################*/
 
-#include "constants.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <pthread.h>
+#include <errno.h>
 #include "processing.h"
 #include "discovery.h"
 
-void* ClientInputSubprocess();
+// Função para executar o cliente
+void RunClient(int port);
 
-void RunClient();
+// Função para processar entrada do usuário
+void* ClientInputSubprocess(void* arg);
 
 #endif

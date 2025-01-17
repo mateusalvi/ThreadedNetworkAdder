@@ -4,17 +4,40 @@
 #     Luís Filipe Martini Gastmann – Mateus Luiz Salvi     #
 ############################################################
 
-RunServer.o: RunClient.o RunServer.c discovery.h processing.h constants.h  server_prot.h
-	gcc RunServer.c -o RunServer discovery.c processing.c server_prot.c -lpthread
+CC=gcc
+CFLAGS=-Wall -pthread
+LDFLAGS=-lpthread
 
-RunClient.o: RunClient.c discovery.h processing.h constants.h client.h 
-	gcc RunClient.c -o RunClient discovery.c processing.c client.c -lpthread
+all: RunClient RunServer
 
-#NetworkAdder.o: NetworkAdder.c discovery.h processing.h constants.h client.h server_prot.h
-#	gcc NetworkAdder.c -o NetworkAdder  discovery.c processing.c client.c server_prot.c -lpthread
+RunClient: RunClient.o discovery.o processing.o client.o
+	$(CC) RunClient.o discovery.o processing.o client.o -o RunClient $(LDFLAGS)
+
+RunServer: RunServer.o server_prot.o discovery.o processing.o
+	$(CC) RunServer.o server_prot.o discovery.o processing.o -o RunServer $(LDFLAGS)
+
+RunClient.o: RunClient.c client.h
+	$(CC) $(CFLAGS) -c RunClient.c
+
+RunServer.o: RunServer.c server_prot.h
+	$(CC) $(CFLAGS) -c RunServer.c
+
+server_prot.o: server_prot.c server_prot.h discovery.h
+	$(CC) $(CFLAGS) -c server_prot.c
+
+discovery.o: discovery.c discovery.h
+	$(CC) $(CFLAGS) -c discovery.c
+
+processing.o: processing.c processing.h
+	$(CC) $(CFLAGS) -c processing.c
+
+client.o: client.c client.h discovery.h processing.h
+	$(CC) $(CFLAGS) -c client.c
 
 clean:
-	rm *.o RunClient RunServer
+	rm -f *.o RunClient RunServer
+
+.PHONY: all clean
 
 
 ############################################################################################################################

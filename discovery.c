@@ -4,463 +4,533 @@
 #     Luís Filipe Martini Gastmann – Mateus Luiz Salvi     #
 ##########################################################*/
 
-#define _GNU_SOURCE /* To get defns of NI_MAXSERV and NI_MAXHOST */
 #include "discovery.h"
+#include "server_prot.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <pthread.h>
+#include <errno.h>
+#include <sys/ioctl.h>
+#include <net/if.h>
 
-int clientsCount = 0;
-char MyIP[INET_ADDRSTRLEN];
+// Definição das variáveis globais
 CLIENT_INFO clients[MAX_CLIENTS];
-pthread_mutex_t mutexClientList;
+int num_clients = 0;
+pthread_mutex_t clients_mutex = PTHREAD_MUTEX_INITIALIZER;
 
-// Subnet mask getter, thanks to https://stackoverflow.com/questions/18100761/obtaining-subnetmask-in-c
-int get_addr_and_netmask_using_ifaddrs(const char *ifa_name, char *addr, char *netmask)
-{
-    struct ifaddrs *ifap, *ifa;
-    struct sockaddr_in *sa;
-    char *s;
-    int found = 0;
-
-    if (getifaddrs(&ifap) == -1)
-    {
-        perror("getifaddrs");
-        exit(EXIT_FAILURE);
-    }
-
-    for (ifa = ifap; ifa && !found; ifa = ifa->ifa_next)
-    {
-        if (ifa->ifa_addr == NULL)
-            continue;
-
-        if (strcasecmp(ifa_name, ifa->ifa_name))
-            continue;
-
-        /* IPv4 */
-        if (ifa->ifa_addr->sa_family != AF_INET)
-            continue;
-
-        sa = (struct sockaddr_in *)ifa->ifa_addr;
-        s = inet_ntoa(sa->sin_addr);
-        strcpy(addr, s);
-
-        sa = (struct sockaddr_in *)ifa->ifa_netmask;
-        s = inet_ntoa(sa->sin_addr);
-        strcpy(netmask, s);
-
-        found = 1;
-    }
-
-    freeifaddrs(ifap);
-
-    if (found)
-        return EXIT_SUCCESS;
-    return EXIT_FAILURE;
-}
-
-char *GetBroadcastAdress()
-{
+void SendMessage(char *message, char *ip, int port, char *returnMessage, bool expectReturn) {
     int sockfd;
-    struct ifreq ifr;
-    struct sockaddr_in *sin;
-    char *broadcast_addr = malloc(INET_ADDRSTRLEN);
+    struct sockaddr_in server_addr;
+    socklen_t server_len = sizeof(server_addr);
+    static long long seqn = 1;
 
-    // Create a socket to get interface address
+    printf("SendMessage: Preparing to send to %s:%d\n", ip, port);
+
+    // Cria o socket
     sockfd = socket(AF_INET, SOCK_DGRAM, 0);
-    if (sockfd < 0)
-    {
-        perror("socket creation failed");
-        exit(EXIT_FAILURE);
+    if (sockfd < 0) {
+        perror("ERROR opening socket");
+        return;
     }
 
-    // Get the interface address
-    strncpy(ifr.ifr_name, "eth0", IFNAMSIZ - 1);
-    ifr.ifr_name[IFNAMSIZ - 1] = '\0';
-    if (ioctl(sockfd, SIOCGIFADDR, &ifr) < 0)
-    {
-        perror("ioctl failed to get IP address");
+    // Configura o endereço do servidor
+    memset(&server_addr, 0, sizeof(server_addr));
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_port = htons(port);
+    if (inet_pton(AF_INET, ip, &server_addr.sin_addr) <= 0) {
+        printf("ERROR invalid IP address: %s\n", ip);
         close(sockfd);
-        exit(EXIT_FAILURE);
+        return;
     }
 
-    sin = (struct sockaddr_in *)&ifr.ifr_addr;
-    char *ip_addr = inet_ntoa(sin->sin_addr);
-
-    // Get the netmask
-    if (ioctl(sockfd, SIOCGIFNETMASK, &ifr) < 0)
-    {
-        perror("ioctl failed to get netmask");
+    // Configura timeout do socket
+    struct timeval tv;
+    tv.tv_sec = 0;
+    tv.tv_usec = SOCKET_TIMEOUT_MS * 1000;  // Converte para microssegundos
+    if (setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) < 0) {
+        perror("ERROR setting timeout");
         close(sockfd);
-        exit(EXIT_FAILURE);
+        return;
     }
 
-    sin = (struct sockaddr_in *)&ifr.ifr_netmask;
-    char *netmask = inet_ntoa(sin->sin_addr);
+    // Prepara o pacote
+    packet request_packet;
+    request_packet.type = REQ;
+    request_packet.data.req.seqn = seqn++;
+    request_packet.data.req.value = atoi(message);
 
-    // Calculate the broadcast address
-    struct in_addr addr, mask, broadcast;
-    inet_aton(ip_addr, &addr);
-    inet_aton(netmask, &mask);
-    broadcast.s_addr = addr.s_addr | (~mask.s_addr);
+    printf("SendMessage: Sending packet type=%d, seqn=%lld, value=%d\n", 
+           request_packet.type, request_packet.data.req.seqn, request_packet.data.req.value);
 
-    // Convert broadcast address to string
-    strcpy(broadcast_addr, inet_ntoa(broadcast));
-
-    close(sockfd);
-    printf("Broadcast address is: %s \n", broadcast_addr);
-    return broadcast_addr;
-}
-
-void BroadcastSignIn(int port, char *returnMessage)
-{
-    int sockfd, n;
-	unsigned int length;
-	struct sockaddr_in serv_addr, from;
-	struct hostent *server;
-	
-	server = gethostbyname(GetBroadcastAdress());
-    
-	if (server == NULL) {
-        fprintf(stderr,"ERROR, no such host\n");
-        exit(0);
-    }	
-	
-	if ((sockfd = socket(AF_INET, SOCK_DGRAM, 0)) == -1)
-		printf("ERROR opening socket");
-	
-	serv_addr.sin_family = AF_INET;     
-	serv_addr.sin_port = htons(port);    
-	serv_addr.sin_addr = *((struct in_addr *)server->h_addr);
-	bzero(&(serv_addr.sin_zero), 8);  
-
-    char signInMessage[12] = SERVER_DISCOVERY_MESSAGE;
-    printf("SENDING MESSAGE: %s\n", signInMessage);
-	n = sendto(sockfd, signInMessage, strlen(signInMessage), 0, (const struct sockaddr *) &serv_addr, sizeof(struct sockaddr_in));
-	if (n < 0) 
-		printf("ERROR sendto");
-
-	char buffer[256];
-    bzero(buffer, 256);
-	fgets(buffer, 256, stdin);
-	length = sizeof(struct sockaddr_in);
-	n = recvfrom(sockfd, returnMessage, sizeof(returnMessage), 0, (struct sockaddr *) &from, &length);
-	if (n < 0)
-		printf("ERROR recvfrom");
-
-	printf("Got an ack: %s\n", buffer);
-	
-	close(sockfd);
-}
-
-void SendMessage(char *message, char *ip, int port, char *returnMessage, bool expectReturn)
-{
-    int sockfd, n;
-    unsigned int length;
-    struct sockaddr_in dest_Addr, from, my_addr;
-    struct hostent *server;
-
-    // if (argc < 2) {
-    // 	fprintf(stderr, "usage %s hostname\n", argv[0]);
-    // 	exit(0);
-    // }
-    server = gethostbyname(ip); //?????????????????????????????????????????????
-    if (server == NULL)
-    {
-        fprintf(stderr, "ERROR, no such host\n");
-        exit(0);
+    // Envia a mensagem
+    if (sendto(sockfd, &request_packet, sizeof(request_packet), 0,
+               (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
+        perror("ERROR sending message");
+        close(sockfd);
+        return;
     }
 
-    if ((sockfd = socket(AF_INET, SOCK_DGRAM, 0)) == -1)
-        printf("ERROR opening socket\n");
+    if (expectReturn) {
+        // Recebe a resposta
+        packet response_packet;
+        int n = recvfrom(sockfd, &response_packet, sizeof(response_packet), 0,
+                        (struct sockaddr *)&server_addr, &server_len);
+        if (n < 0) {
+            if (errno != EAGAIN && errno != EWOULDBLOCK) {
+                switch (errno) {
+                    case EBADF:
+                        printf("ERROR EBADF\n");
+                        break;
+                    case ECONNREFUSED:
+                        printf("ERROR ECONNREFUSED\n");
+                        break;
+                    case EFAULT:
+                        printf("ERROR EFAULT\n");
+                        break;
+                    case EINTR:
+                        printf("ERROR EINTR\n");
+                        break;
+                    case EINVAL:
+                        printf("ERROR EINVAL\n");
+                        break;
+                    case ENOMEM:
+                        printf("ERROR ENOMEM\n");
+                        break;
+                    case ENOTCONN:
+                        printf("ERROR ENOTCONN\n");
+                        break;
+                    case ENOTSOCK:
+                        printf("ERROR ENOTSOCK\n");
+                        break;
+                    default:
+                        printf("ERROR NOT SPECIFIED recvfrom\n");
+                        break;
+                }
+                perror("ERROR receiving response");
+            }
+            printf("SendMessage: No response received (timeout)\n");
+        } else if (n != sizeof(response_packet)) {
+            printf("SendMessage: Received incomplete packet: %d bytes\n", n);
+        } else {
+            printf("SendMessage: Received response packet type=%d, seqn=%lld, value=%d, status=%d\n", 
+                   response_packet.type, response_packet.data.resp.seqn,
+                   response_packet.data.resp.value, response_packet.data.resp.status);
 
-    // // BIND SOCKET
-	memset(&my_addr, 0, sizeof(my_addr));
-	my_addr.sin_family = AF_INET;
-	my_addr.sin_port = htons(port);
-	my_addr.sin_addr.s_addr = INADDR_ANY;  
-
-	if (bind(sockfd, (struct sockaddr *) &my_addr, sizeof(my_addr)) < 0) 
-		perror("ERROR on binding");
-
-    
-    dest_Addr.sin_family = AF_INET;
-    dest_Addr.sin_port = htons(port);
-    dest_Addr.sin_addr = *((struct in_addr *)server->h_addr);
-    bzero(&(dest_Addr.sin_zero), 8);
-
-    printf("Sending \"%s\" to \"%s:%d with hostname \"%s\"\n", message, ip, ntohs(dest_Addr.sin_port), server->h_name);
-    n = sendto(sockfd, message, strlen(message), 0, (const struct sockaddr *)&dest_Addr, sizeof(struct sockaddr_in));
-    if (n < 0)
-    {
-        printf("ERROR sendto\n");
-        exit(EXIT_FAILURE);
-    }
-    printf("Message \"%s\" sent\n", message);
-    if (expectReturn)
-    {
-        printf("Waiting for response from %s:%d...\n", server->h_name, ntohs(dest_Addr.sin_port));
-        length = sizeof(struct sockaddr_in);
-        n = recvfrom(sockfd, returnMessage, 256, 0, (struct sockaddr *)&from, &length);
-        if (n < 0)
-            printf("ERROR recvfrom ");
-        printf("Received a datagram: %s\n", returnMessage);
-    }
-
-    close(sockfd);
-}
-
-CLIENT_INFO *ListenForNewClients(int port)
-{
-    int sockfd, n;
-    socklen_t clilen;
-    struct sockaddr_in serv_addr, cli_addr;
-    char buf[MAX_MESSAGE_LEN] = "";
-    CLIENT_INFO *newClient = NULL;
-
-    if ((sockfd = socket(AF_INET, SOCK_DGRAM, 0)) == -1)
-        printf("ERROR opening socket");
-
-    serv_addr.sin_family = AF_INET;
-    serv_addr.sin_port = htons(port);
-    serv_addr.sin_addr.s_addr = INADDR_ANY;
-    bzero(&(serv_addr.sin_zero), 8);
-    
-    // Copy ip adress to MyIP constant
-    //inet_ntop(AF_INET, &serv_addr, MyIP, INET_ADDRSTRLEN);
-
-    int opt = 1;
-    if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, (char *)&opt, sizeof(opt))<0) 
-    {
-        perror("setsockopt");
-        exit(EXIT_FAILURE);
-    }
-    
-    if(setsockopt(sockfd, SOL_SOCKET, SO_REUSEPORT, (char *)&opt, sizeof(opt))<0)
-    {
-        perror("setsockopt");
-        exit(EXIT_FAILURE);
-    }
-
-    if (bind(sockfd, (struct sockaddr *)&serv_addr, sizeof(struct sockaddr)) < 0)
-        printf("ERROR on binding on ListenForClients");
-
-    clilen = sizeof(struct sockaddr_in);
-
-    // while (1)
-    // {
-    /* receive from socket */
-
-    char hostbuffer[256];
-    char *IPbuffer;
-    struct hostent *host_entry;
-    int hostname;
-
-    // To retrieve hostname
-    hostname = gethostname(hostbuffer, sizeof(hostbuffer));
-    // To retrieve host information
-    host_entry = gethostbyname(hostbuffer);
-    // To convert an Internet network
-    // address into ASCII string
-    IPbuffer = inet_ntoa(*((struct in_addr*)host_entry->h_addr_list[0]));
-
-    printf("Hostname: %s\n", hostbuffer);
-    strcpy(MyIP, IPbuffer);
-    printf("Host IP: %s\n", MyIP);
-    printf("Listening for new clients...\n");
-
-    //printf("Listening for new clients...\n");
-    n = recvfrom(sockfd, buf, MAX_MESSAGE_LEN, 0, (struct sockaddr *)&cli_addr, &clilen);
-
-    if (n < 0)
-        printf("ERROR on recvfrom");
-    printf("Received a datagram: %s\n", buf);
-
-    /* send to socket */
-    // n = sendto(sockfd, "Got your message\n", 17, 0, (struct sockaddr *)&cli_addr, sizeof(struct sockaddr));
-    // if (n < 0)
-    //     printf("ERROR on sendto");
-
-    // Se a menssagem recebida for a de SERVER DISCOVERY
-    if (strcmp(buf, SERVER_DISCOVERY_MESSAGE) == 0)
-    {
-        char message[MAX_MESSAGE_LEN] = "";
-        char _port[5];
-        strcat(message, "#");
-        strcat(message, MyIP);
-        strcat(message, "#");
-        if (sprintf(_port, "%d", port+1+clientsCount) < 0)
-            printf("ERRO NO SPRINTF!\n");
-        strcat(message, _port);
-
-        // strcat(message, "\0");
-        printf("Sending response: \"%s\"\n", message);
-        // Responde ao novo cliente.
-        n = sendto(sockfd, &message, MAX_MESSAGE_LEN, 0, (struct sockaddr *)&cli_addr, sizeof(struct sockaddr));
-        if (n < 0)
-            printf("ERROR on sendto");
-        else
-        {
-            char ip[16];
-            inet_ntop(AF_INET, &cli_addr.sin_addr, ip, sizeof(ip));
-            newClient = AddNewClient(ip, port+1+clientsCount);
+            if (response_packet.type == REQ_ACK && 
+                response_packet.data.resp.seqn == request_packet.data.req.seqn) {
+                if (response_packet.data.resp.status == 0) {
+                    snprintf(returnMessage, MAX_MESSAGE_LEN, "%d", response_packet.data.resp.value);
+                } else {
+                    printf("SendMessage: Server reported error: %d\n", response_packet.data.resp.status);
+                }
+            } else {
+                printf("SendMessage: Received invalid response type=%d or seqn mismatch (got %lld, expected %lld)\n",
+                       response_packet.type, response_packet.data.resp.seqn, request_packet.data.req.seqn);
+            }
         }
     }
 
     close(sockfd);
-
-    return newClient;
 }
 
-int ListenForAddRequest(int port, char *clientIP)
-{
-    // int sockfd, n;
-    // socklen_t clilen;
-    // struct sockaddr_in serv_addr, cli_addr;
-    // char buf[256];
-    // if ((sockfd = socket(AF_INET, SOCK_DGRAM, 0)) == -1)
-    //     printf("ERROR opening socket");
+void BroadcastSignIn(int port, char *returnMessage) {
+    int sockfd;
+    struct sockaddr_in broadcast_addr;
+    packet discovery_packet;
+    static long long seqn = 1;
 
-    // serv_addr.sin_family = AF_INET;
-    // serv_addr.sin_port = htons(port);
-    // //serv_addr.sin_addr.s_addr = INADDR_ANY;
-    // bzero(&(serv_addr.sin_zero), 8);
-    // inet_pton(AF_INET, clientIP, &(cli_addr.sin_addr.s_addr));
-    // //printf("Trying to bind to %s:%d\n", clientIP, port);
+    printf("Starting server discovery on port %d...\n", port);
 
-    // int opt = 1;
-    // if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, (char *)&opt, sizeof(opt))<0) 
-    // {
-    //     perror("setsockopt");
-    //     exit(EXIT_FAILURE);
-    // }
+    // Cria o socket
+    sockfd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (sockfd < 0) {
+        perror("ERROR opening socket");
+        return;
+    }
+
+    // Configura opções do socket para broadcast
+    int broadcast_enable = 1;
+    if (setsockopt(sockfd, SOL_SOCKET, SO_BROADCAST, &broadcast_enable, sizeof(broadcast_enable)) < 0) {
+        perror("ERROR setting broadcast option");
+        close(sockfd);
+        return;
+    }
+
+    // Configura timeout do socket
+    struct timeval tv;
+    tv.tv_sec = 0;
+    tv.tv_usec = SOCKET_TIMEOUT_MS * 1000;  // Converte para microssegundos
+    if (setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) < 0) {
+        perror("ERROR setting timeout");
+        close(sockfd);
+        return;
+    }
+
+    // Configura o endereço de broadcast
+    memset(&broadcast_addr, 0, sizeof(broadcast_addr));
+    broadcast_addr.sin_family = AF_INET;
+    broadcast_addr.sin_addr.s_addr = inet_addr("255.255.255.255");
+    broadcast_addr.sin_port = htons(port);
+
+    // Prepara o pacote de descoberta
+    discovery_packet.type = DESC;
+    discovery_packet.data.req.seqn = seqn++;
+    discovery_packet.data.req.value = 0;
+
+    printf("Sending discovery broadcast to port %d...\n", port);
+
+    // Envia o pacote de descoberta
+    if (sendto(sockfd, &discovery_packet, sizeof(discovery_packet), 0,
+               (struct sockaddr *)&broadcast_addr, sizeof(broadcast_addr)) < 0) {
+        perror("ERROR sending discovery packet");
+        close(sockfd);
+        return;
+    }
+
+    printf("Waiting for server response...\n");
+
+    // Aguarda resposta
+    packet response_packet;
+    struct sockaddr_in server_addr;
+    socklen_t server_len = sizeof(server_addr);
     
-    // if(setsockopt(sockfd, SOL_SOCKET, SO_REUSEPORT, (char *)&opt, sizeof(opt))<0)
-    // {
-    //     perror("setsockopt");
-    //     exit(EXIT_FAILURE);
-    // }
-
-    // if (bind(sockfd, (struct sockaddr *)&serv_addr, sizeof(struct sockaddr)) < 0)
-    //     printf("Error on binding at listen for add request method\n");
-
-    // clilen = sizeof(struct sockaddr_in);
-
-    // char message[MAX_MESSAGE_LEN] = "";
-    // // strcat(message, MyIP);
-
-    // /* receive from socket */
-    // printf("Listening for requests from %s:%d \n", clientIP, port);
-    // n = recvfrom(sockfd, buf, 256, 0, (struct sockaddr *)&cli_addr, &clilen);
-    // if (n < 0)
-    //     printf("ERROR on recvfrom");
-
-    // printf("Received a request from %s:%d of +%s\n", clientIP, port, buf);
-
-    // /* send to socket */
-    // // n = sendto(sockfd, "Got your message\n", 17, 0, (struct sockaddr *)&cli_addr, sizeof(struct sockaddr));
-    // // if (n < 0)
-    // //     printf("ERROR on sendto");
-
-    // // Se a menssagem recebida for a de SERVER DISCOVERY
-    // //  if(strcmp(buf, SERVER_DISCOVERY_MESSAGE) == 0)
-    // //  {
-    // // Responde ao novo cliente.
-    // // n = sendto(sockfd, message, MAX_MESSAGE_LEN, 0, (struct sockaddr *)&cli_addr, sizeof(struct sockaddr));
-    // // if (n < 0)
-    // //     printf("ERROR on sendto");
-
-    // close(sockfd);
-    // return atoi(buf);
-}
-
-void *addRequestListenerThread(void *arg)
-{
-    CLIENT_INFO* thisClient = ((CLIENT_INFO *)arg);
-    int sockfd, n;
-    socklen_t clilen;
-    struct sockaddr_in serv_addr, cli_addr;
-    char buf[256];
-    if ((sockfd = socket(AF_INET, SOCK_DGRAM, 0)) == -1)
-        printf("ERROR opening socket");
-
-    printf("This client port: %d\n", thisClient->port);
-
-    // // BIND SOCKET
-	memset(&serv_addr, 0, sizeof(serv_addr));
-    serv_addr.sin_family = AF_INET;
-    serv_addr.sin_port = htons(thisClient->port);
-    serv_addr.sin_addr.s_addr = INADDR_ANY; 
-    bzero(&(serv_addr.sin_zero), 8);
-
-    // inet_pton(AF_INET, thisClient->IP, &(cli_addr.sin_addr.s_addr));
-
-    // int opt = 1;
-    // if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, (char *)&opt, sizeof(opt))<0) 
-    // {
-    //     perror("setsockopt");
-    //     exit(EXIT_FAILURE);
-    // }
-    
-    // if(setsockopt(sockfd, SOL_SOCKET, SO_REUSEPORT, (char *)&opt, sizeof(opt))<0)
-    // {
-    //     perror("setsockopt");
-    //     exit(EXIT_FAILURE);
-    // }
-
-    if (bind(sockfd, (struct sockaddr *)&serv_addr, sizeof(struct sockaddr)) < 0)
-        printf("Error on binding at listen for add request method\n");
-
-    clilen = sizeof(struct sockaddr_in);
-
-    char message[MAX_MESSAGE_LEN] = "";
-
-    while (thisClient->is_connected > 0)
-    {
-        bzero(buf, sizeof(buf));
-        printf("Listening for requests from %s:%d \n", thisClient->IP, thisClient->port);
-        n = recvfrom(sockfd, buf, 256, 0, (struct sockaddr *)&cli_addr, &clilen);
-        if (n < 0)
-            printf("ERROR on recvfrom");
-        printf("Received a request from %s:%d of +%s\n", thisClient->IP, thisClient->port, buf);
-        thisClient->newRequestValue = atoi(buf);
+    int n = recvfrom(sockfd, &response_packet, sizeof(response_packet), 0,
+                     (struct sockaddr *)&server_addr, &server_len);
+    if (n < 0) {
+        if (errno != EAGAIN && errno != EWOULDBLOCK) {
+            switch (errno) {
+                case EBADF:
+                    printf("ERROR EBADF\n");
+                    break;
+                case ECONNREFUSED:
+                    printf("ERROR ECONNREFUSED\n");
+                    break;
+                case EFAULT:
+                    printf("ERROR EFAULT\n");
+                    break;
+                case EINTR:
+                    printf("ERROR EINTR\n");
+                    break;
+                case EINVAL:
+                    printf("ERROR EINVAL\n");
+                    break;
+                case ENOMEM:
+                    printf("ERROR ENOMEM\n");
+                    break;
+                case ENOTCONN:
+                    printf("ERROR ENOTCONN\n");
+                    break;
+                case ENOTSOCK:
+                    printf("ERROR ENOTSOCK\n");
+                    break;
+                default:
+                    printf("ERROR NOT SPECIFIED recvfrom\n");
+                    break;
+            }
+            perror("ERROR receiving broadcast response");
+        }
+        printf("No response received from server\n");
+    } else {
+        if (response_packet.type == DESC_ACK) {
+            char server_ip[INET_ADDRSTRLEN];
+            inet_ntop(AF_INET, &(server_addr.sin_addr), server_ip, INET_ADDRSTRLEN);
+            printf("Received response from server at %s:%d\n", server_ip, response_packet.data.resp.value);
+            
+            // Formata a resposta como #IP#PORT
+            snprintf(returnMessage, MAX_MESSAGE_LEN, "#%s#%d", server_ip, response_packet.data.resp.value);
+        } else {
+            printf("Received invalid response type: %d\n", response_packet.type);
+        }
     }
 
     close(sockfd);
 }
 
-// Returns the new client Index (ID)
-CLIENT_INFO *AddNewClient(char* clientIP, int port)
-{
-    // char clientIP[INET_ADDRSTRLEN];
-    // inet_ntop(AF_INET, &cli_addr.sin_addr, clientIP, INET_ADDRSTRLEN);
-    clientsCount++;
-    memcpy(&clients[clientsCount], NewClientStruct(clientsCount - 1, clientIP, port), sizeof(CLIENT_INFO));
-    printf("Added new client: %s:%d\n", clientIP, port);
+void ListenForNewClients(int port) {
+    int sockfd;
+    struct sockaddr_in server_addr, client_addr;
+    socklen_t client_len = sizeof(client_addr);
+    packet received_packet, response_packet;
 
-    return &clients[clientsCount];
+    printf("Starting client listener on port %d...\n", port);
+
+    // Cria o socket
+    sockfd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (sockfd < 0) {
+        perror("ERROR opening socket");
+        return;
+    }
+
+    // Configura opções do socket
+    int opt = 1;
+    if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0) {
+        perror("ERROR setting socket options");
+        close(sockfd);
+        return;
+    }
+
+    // Configura timeout do socket
+    struct timeval tv;
+    tv.tv_sec = 0;
+    tv.tv_usec = SOCKET_TIMEOUT_MS * 1000;  // Converte para microssegundos
+    if (setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) < 0) {
+        perror("ERROR setting timeout");
+        close(sockfd);
+        return;
+    }
+
+    // Configura o endereço do servidor
+    memset(&server_addr, 0, sizeof(server_addr));
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_addr.s_addr = INADDR_ANY;
+    server_addr.sin_port = htons(port);
+
+    // Faz o bind do socket
+    if (bind(sockfd, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
+        perror("ERROR on binding");
+        close(sockfd);
+        return;
+    }
+
+    printf("Client listener active on port %d...\n", port);
+
+    while (1) {
+        // Recebe a mensagem
+        int n = recvfrom(sockfd, &received_packet, sizeof(received_packet), 0,
+                        (struct sockaddr *)&client_addr, &client_len);
+        
+        if (n < 0) {
+            if (errno != EAGAIN && errno != EWOULDBLOCK) {
+                perror("ERROR receiving client message");
+            }
+        } else if (n != sizeof(received_packet)) {
+            printf("Received incomplete packet: %d bytes\n", n);
+        } else {
+            printf("Received packet from %s:%d\n",
+                   inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
+
+            if (received_packet.type == DESC) {
+                // Prepara a resposta
+                response_packet.type = DESC_ACK;
+                response_packet.data.resp.seqn = received_packet.data.req.seqn;
+                response_packet.data.resp.value = port + 1;  // Porta para comunicação futura
+                response_packet.data.resp.status = 0;
+
+                // Envia a resposta
+                n = sendto(sockfd, &response_packet, sizeof(response_packet), 0,
+                          (struct sockaddr *)&client_addr, sizeof(client_addr));
+                if (n < 0) {
+                    perror("ERROR sending response to client");
+                } else if (n != sizeof(response_packet)) {
+                    printf("Sent incomplete response: %d bytes\n", n);
+                } else {
+                    printf("Sent response to client at %s:%d\n",
+                           inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
+                }
+            }
+        }
+        usleep(100000);  // Evita consumo excessivo de CPU (100ms)
+    }
+
+    close(sockfd);
 }
 
-// void DefineServerIP(char *newServerIP, char *port)
-// {
-//     strcpy(ServerIP, newServerIP);
-//     strcpy(ServerPort, port);
-// }
+int ListenForAddRequest(int port, char *clientIP) {
+    int sockfd;
+    struct sockaddr_in server_addr, client_addr;
+    socklen_t client_len = sizeof(client_addr);
+    char buffer[MAX_MESSAGE_LEN];
 
-CLIENT_INFO *GetClientsVector()
-{
-    CLIENT_INFO *copyOfClients[MAX_CLIENTS];
-    pthread_mutex_lock(&mutexClientList);
-    memcpy(&copyOfClients, &clients, sizeof(copyOfClients));
-    pthread_mutex_unlock(&mutexClientList);
-    return *copyOfClients;
+    // Cria o socket
+    sockfd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (sockfd < 0) {
+        perror("ERROR opening socket");
+        return -1;
+    }
+
+    // Configura opções do socket
+    int opt = 1;
+    if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0) {
+        perror("ERROR setting socket options");
+        close(sockfd);
+        return -1;
+    }
+
+    // Configura o endereço do servidor
+    memset(&server_addr, 0, sizeof(server_addr));
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_addr.s_addr = INADDR_ANY;
+    server_addr.sin_port = htons(port);
+
+    // Faz o bind do socket
+    if (bind(sockfd, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
+        perror("ERROR on binding");
+        close(sockfd);
+        return -1;
+    }
+
+    // Recebe mensagem do cliente
+    int n = recvfrom(sockfd, buffer, sizeof(buffer) - 1, 0,
+                     (struct sockaddr *)&client_addr, &client_len);
+    if (n < 0) {
+        perror("ERROR receiving from client");
+        close(sockfd);
+        return -1;
+    }
+
+    buffer[n] = '\0';
+    strcpy(clientIP, inet_ntoa(client_addr.sin_addr));
+
+    // Converte a mensagem para número
+    int value = atoi(buffer);
+
+    // Envia confirmação
+    char response[] = "OK";
+    if (sendto(sockfd, response, strlen(response), 0,
+               (struct sockaddr *)&client_addr, client_len) < 0) {
+        perror("ERROR sending response to client");
+    }
+
+    close(sockfd);
+    return value;
 }
 
-CLIENT_INFO *NewClientStruct(int id, char *ip, int port)
-{
-    CLIENT_INFO *p = malloc(sizeof(CLIENT_INFO));
-    p->client_id = id;
-    p->last_value = 0;
-    strcpy(p->IP, ip);
-    p->port = port;
-    p->is_connected = 1;
-    p->newRequestValue = 0;
-    return p;
+void addRequestListenerThread(void *arg) {
+    CLIENT_INFO *client = (CLIENT_INFO *)arg;
+    char *clientIP = client->ip;  // Agora usando ip em vez de IP
+    int clientPort = client->port;
+    char returnMessage[MAX_MESSAGE_LEN];
+
+    printf("Starting request listener thread for client %s:%d\n", clientIP, clientPort);
+
+    while (1) {
+        int requestValue = ListenForAddRequest(clientPort, clientIP);
+        if (requestValue >= 0) {
+            printf("Received add request with value %d from %s:%d\n",
+                   requestValue, clientIP, clientPort);
+        }
+        usleep(100000);  // 100ms sleep para evitar consumo excessivo de CPU
+    }
+}
+
+CLIENT_INFO AddNewClient(char* clientIP, int port) {
+    pthread_mutex_lock(&clients_mutex);
+    CLIENT_INFO new_client = NewClientStruct(num_clients + 1, clientIP, port);
+    if (num_clients < MAX_CLIENTS) {
+        clients[num_clients++] = new_client;
+    }
+    pthread_mutex_unlock(&clients_mutex);
+    return new_client;
+}
+
+CLIENT_INFO GetClientsVector() {
+    // Retorna uma cópia do primeiro cliente (para compatibilidade)
+    pthread_mutex_lock(&clients_mutex);
+    CLIENT_INFO client = num_clients > 0 ? clients[0] : NewClientStruct(0, "", 0);
+    pthread_mutex_unlock(&clients_mutex);
+    return client;
+}
+
+CLIENT_INFO NewClientStruct(int id, char *ip, int port) {
+    CLIENT_INFO client;
+    client.id = id;
+    strncpy(client.ip, ip, sizeof(client.ip) - 1);  // Agora usando ip em vez de IP
+    client.ip[sizeof(client.ip) - 1] = '\0';
+    client.port = port;
+    return client;
+}
+
+char GetBroadcastAdress() {
+    // Esta função não é mais necessária no Linux
+    return '0';
+}
+
+// Testa a conexão com o servidor
+bool TestServerConnection(const char *ip, int port) {
+    int sockfd;
+    struct sockaddr_in server_addr;
+    socklen_t server_len = sizeof(server_addr);
+    packet test_packet, response_packet;
+    static long long seqn = 1;
+
+    printf("Testing connection to server at %s:%d\n", ip, port);
+
+    // Cria o socket
+    sockfd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (sockfd < 0) {
+        perror("ERROR opening socket");
+        return false;
+    }
+
+    // Configura o endereço do servidor
+    memset(&server_addr, 0, sizeof(server_addr));
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_port = htons(port);
+    if (inet_pton(AF_INET, ip, &server_addr.sin_addr) <= 0) {
+        printf("ERROR invalid IP address\n");
+        close(sockfd);
+        return false;
+    }
+
+    // Configura timeout do socket
+    struct timeval tv;
+    tv.tv_sec = 0;
+    tv.tv_usec = SOCKET_TIMEOUT_MS * 1000;  // Converte para microssegundos
+    if (setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) < 0) {
+        perror("ERROR setting timeout");
+        close(sockfd);
+        return false;
+    }
+
+    // Prepara o pacote de teste
+    test_packet.type = REQ;
+    test_packet.data.req.seqn = seqn++;
+    test_packet.data.req.value = 0;
+
+    printf("Sending test packet: type=%d, seqn=%lld, value=%d\n",
+           test_packet.type, test_packet.data.req.seqn, test_packet.data.req.value);
+
+    // Envia o pacote
+    if (sendto(sockfd, &test_packet, sizeof(test_packet), 0,
+               (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
+        perror("ERROR sending test packet");
+        close(sockfd);
+        return false;
+    }
+
+    // Aguarda resposta
+    int n = recvfrom(sockfd, &response_packet, sizeof(response_packet), 0,
+                     (struct sockaddr *)&server_addr, &server_len);
+    
+    if (n < 0) {
+        if (errno != EAGAIN && errno != EWOULDBLOCK) {
+            perror("ERROR receiving test response");
+        }
+        printf("No response received from server (timeout)\n");
+        close(sockfd);
+        return false;
+    }
+
+    if (n != sizeof(response_packet)) {
+        printf("Received incomplete response: %d bytes\n", n);
+        close(sockfd);
+        return false;
+    }
+
+    printf("Received response: type=%d, seqn=%lld, value=%d, status=%d\n",
+           response_packet.type, response_packet.data.resp.seqn,
+           response_packet.data.resp.value, response_packet.data.resp.status);
+
+    close(sockfd);
+
+    // Verifica se a resposta é válida
+    return (response_packet.type == REQ_ACK &&
+            response_packet.data.resp.seqn == test_packet.data.req.seqn &&
+            response_packet.data.resp.status == 0);
 }

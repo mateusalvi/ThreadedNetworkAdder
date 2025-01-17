@@ -1,61 +1,55 @@
-#ifndef _SERVERPROT_
-#define _SERVERPROT_
-/*##########################################################
-# INF01151 - Sistemas Operacionais II N - Turma A (2024/2) #
-#       Adilson Enio Pierog - Andres Grendene Pacheco      #
-#     Luís Filipe Martini Gastmann – Mateus Luiz Salvi     #
-##########################################################*/
-#include <pthread.h>
-#include <string.h>
+#ifndef SERVER_PROT_H
+#define SERVER_PROT_H
+
 #include <stdio.h>
 #include <stdlib.h>
-#include <stdbool.h>
+#include <string.h>
 #include <unistd.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <pthread.h>
 #include <errno.h>
-#include <ctype.h>
-#include "discovery.h"
-#include "constants.h"
-#include "processing.h"
 
-#define ID_BUFFER 32
+#define MAX_MESSAGE_LEN 256
+#define SOCKET_TIMEOUT_MS 100  // 100ms timeout
 
+// Tipos de pacotes
+typedef enum {
+    DESC,       // Descoberta de servidor
+    DESC_ACK,   // Resposta de descoberta
+    REQ,        // Requisição de adição
+    REQ_ACK     // Resposta de adição
+} packet_type;
 
+// Estrutura de requisição
+typedef struct {
+    long long seqn;    // Número de sequência
+    int value;         // Valor a ser somado
+} request_data;
 
-typedef struct request_data
-{
-	int request_value;
-	int request_id;
-	int processed;
-} REQUEST_INFO;
+// Estrutura de resposta
+typedef struct {
+    long long seqn;    // Número de sequência
+    int value;         // Valor atual da soma
+    int status;        // Status da operação (0 = sucesso, outros = erro)
+} response_data;
 
-// typedef struct client_data
-// {
-// 	char client_id[ID_BUFFER];
-// 	REQUEST_INFO request[MAX_BUFFER];
-// 	// Aqui foi apenas uma ideia para nao ter de trabalhar com o endereco MAC podemos
-// 	// fazer uma funcao que gere um id simplificado, mas se quiserem trabalhar com o
-// 	// id completo tem de adaptar o codigo para trabalhar com strings
-// 	int client_simple_id;
-// 	int client_received_value[MAX_BUFFER];
-// 	int is_connected;
-// 	int last_value;
-// } CLIENT_INFO;
+// Estrutura do pacote
+typedef struct {
+    packet_type type;  // Tipo do pacote
+    union {
+        request_data req;    // Dados da requisição
+        response_data resp;  // Dados da resposta
+    } data;
+} packet;
 
-void *AckSumRequest_Consumer(void *arg);
-void *SumRequest_Producer(void *arg);
-static void *ClientHandlerThread(void *arg);
-int max_ticket();
-static void *thread_process(void *arg);
-static void *ClientHandlerThread(void *arg);
-void ServerMain(char* port);
-void return_value_to_client(int value);
-int msg_to_client(char *message_to_send);
-int wait_closure();
-void client_input_value(int *buffer);
-void wait_for_unlock(pthread_mutex_t mutex_A);
-void wait_disconnect(CLIENT_INFO *this_client);
-void RegisterNewClient(CLIENT_INFO *this_client);
-int NetworkListenerSubprocess(char* port);
-// void* AddNewClient(CLIENT_INFO *newClient);
+// Funções do servidor
+void ServerMain(const char* port);
+void start_server(int port);
+void discovery_service(int port);
+void request_service(int port);
+int receive_and_decode_message(int sockfd, packet *received_packet, struct sockaddr_in *client_addr);
 
-#endif
+#endif // SERVER_PROT_H

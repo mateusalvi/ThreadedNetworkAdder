@@ -8,22 +8,10 @@ DEVE SER ENCAIXADA NO LUGAR CERTO!!!! (eu nao me lembro onde era)
 
 #include "processing.h"
 
-void adder_implementation(int requestValue, int string_size, int *resultado, char *answer_to_client)
-{
-	int i, aux = (*resultado);
-	// Esta soma ja devolve o resultado porem sem formatacao em string
+void adder_implementation(int requestValue, int string_size, int *resultado, char *answer_to_client) {
+    // Atualiza o resultado acumulado
+    *resultado += requestValue;
 
-	*resultado = requestValue;
-
-	//ISSO NÃO FUNCIONOU. para completamente a thread
-	//int result = *resultado;
-	// Formatacao em string do valor somado
-	// for (i = 0; i < string_size; i++)
-	// {
-	// 	answer_to_client[i] = floor(result / (10 ^ (string_size - i)));
-	// 	aux = aux % (10 ^ (string_size - i));
-	// }
-	// Forcar o '/0'
-	//i++;
-	//answer_to_client[i] = 0;
+    // Formata o resultado em string
+    sprintf(answer_to_client, "%d", *resultado);
 }
