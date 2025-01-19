@@ -6,6 +6,7 @@
 
 #include "server_prot.h"
 #include "discovery.h"
+#include "replication.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -17,8 +18,7 @@
 #include <errno.h>
 
 // Variáveis globais
-static int total_sum = 0;
-pthread_mutex_t sum_mutex = PTHREAD_MUTEX_INITIALIZER;
+static int running = 1;
 
 int receive_and_decode_message(int sockfd, packet *received_packet, struct sockaddr_in *client_addr) {
     socklen_t client_len = sizeof(struct sockaddr_in);
@@ -62,7 +62,7 @@ int receive_and_decode_message(int sockfd, packet *received_packet, struct socka
 void discovery_service(int port) {
     int sockfd;
     struct sockaddr_in server_addr, client_addr;
-    packet received_packet, response_packet;
+    packet received_packet;
 
     printf("Starting discovery service on port %d...\n", port);
 
@@ -112,29 +112,32 @@ void discovery_service(int port) {
             printf("Discovery service: Processing packet from %s:%d\n",
                    inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
 
-            if (received_packet.type == DESC) {
-                printf("Discovery service: Received DESC packet\n");
+            // Ignora pacotes que não são de descoberta
+            if (received_packet.type != DESC) {
+                printf("Discovery service: Ignoring non-discovery packet type: %d\n", received_packet.type);
+                continue;
+            }
 
-                // Prepara a resposta
-                response_packet.type = DESC_ACK;
-                response_packet.data.resp.seqn = received_packet.data.req.seqn;
-                response_packet.data.resp.value = port + 1;  // Retorna a porta do serviço de requisições
-                response_packet.data.resp.status = 0;    // Sucesso
+            printf("Discovery service: Received DESC packet\n");
 
-                printf("Discovery service: Sending DESC_ACK with request port %d\n", port + 1);
+            // Prepara a resposta
+            packet response_packet;
+            response_packet.type = DESC_ACK;
+            response_packet.data.resp.seqn = received_packet.data.req.seqn;
+            response_packet.data.resp.value = port + 1;  // Retorna a porta de requisições
+            response_packet.data.resp.status = 0;  // Sucesso
 
-                // Envia a resposta
-                int n = sendto(sockfd, &response_packet, sizeof(response_packet), 0,
-                             (struct sockaddr *)&client_addr, sizeof(client_addr));
-                if (n < 0) {
-                    perror("ERROR sending discovery response");
-                } else if (n != sizeof(response_packet)) {
-                    printf("Discovery service: Sent incomplete packet: %d bytes\n", n);
-                } else {
-                    printf("Discovery service: Response sent successfully\n");
-                }
+            printf("Discovery service: Sending DESC_ACK with request port %d\n", port + 1);
+
+            // Envia a resposta
+            int n = sendto(sockfd, &response_packet, sizeof(response_packet), 0,
+                         (struct sockaddr *)&client_addr, sizeof(client_addr));
+            if (n < 0) {
+                perror("ERROR sending discovery response");
+            } else if (n != sizeof(response_packet)) {
+                printf("Discovery service: Sent incomplete packet: %d bytes\n", n);
             } else {
-                printf("Discovery service: Received invalid packet type: %d\n", received_packet.type);
+                printf("Discovery service: Response sent successfully\n");
             }
         }
         usleep(100000);  // Evita consumo excessivo de CPU (100ms)
@@ -143,10 +146,10 @@ void discovery_service(int port) {
     close(sockfd);
 }
 
-void request_service(int port) {
+void *request_service(void *arg) {
+    int port = (int)(long)arg;
     int sockfd;
-    struct sockaddr_in server_addr, client_addr;
-    socklen_t client_len = sizeof(client_addr);
+    struct sockaddr_in server_addr;
     packet received_packet;
 
     printf("Starting request service on port %d...\n", port);
@@ -155,7 +158,7 @@ void request_service(int port) {
     sockfd = socket(AF_INET, SOCK_DGRAM, 0);
     if (sockfd < 0) {
         perror("ERROR opening socket");
-        return;
+        return NULL;
     }
 
     // Configura opções do socket
@@ -163,17 +166,7 @@ void request_service(int port) {
     if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0) {
         perror("ERROR setting socket options");
         close(sockfd);
-        return;
-    }
-
-    // Configura timeout do socket
-    struct timeval tv;
-    tv.tv_sec = 0;
-    tv.tv_usec = SOCKET_TIMEOUT_MS * 1000;  // Converte para microssegundos
-    if (setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) < 0) {
-        perror("ERROR setting timeout");
-        close(sockfd);
-        return;
+        return NULL;
     }
 
     // Configura o endereço do servidor
@@ -186,109 +179,129 @@ void request_service(int port) {
     if (bind(sockfd, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
         perror("ERROR on binding");
         close(sockfd);
-        return;
+        return NULL;
     }
 
     printf("Request service listening on port %d...\n", port);
 
-    while (1) {
-        // Recebe e decodifica a mensagem
-        if (receive_and_decode_message(sockfd, &received_packet, &client_addr) >= 0) {
-            printf("Request service: Processing packet from %s:%d\n",
-                   inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
+    while (running) {
+        // Prepara para receber
+        struct sockaddr_in client_addr;
+        socklen_t client_len = sizeof(client_addr);
+        memset(&received_packet, 0, sizeof(received_packet));
 
-            // Processa a mensagem recebida
-            if (received_packet.type == REQ) {
-                printf("Request service: Received REQ packet with seqn=%lld, value=%d\n",
-                       received_packet.data.req.seqn, received_packet.data.req.value);
+        // Recebe a mensagem (bloqueante)
+        ssize_t n = recvfrom(sockfd, &received_packet, sizeof(received_packet), 0,
+                            (struct sockaddr *)&client_addr, &client_len);
 
-                // Se é um pacote de teste (valor 0), apenas responde com ACK
-                if (received_packet.data.req.value == 0) {
-                    packet response_packet;
-                    response_packet.type = REQ_ACK;
-                    response_packet.data.resp.seqn = received_packet.data.req.seqn;
-                    response_packet.data.resp.value = 0;
-                    response_packet.data.resp.status = 0;
-
-                    printf("Request service: Sending test response\n");
-
-                    int n = sendto(sockfd, &response_packet, sizeof(response_packet), 0,
-                                 (struct sockaddr *)&client_addr, sizeof(client_addr));
-                    if (n < 0) {
-                        perror("ERROR sending test response");
-                    } else if (n != sizeof(response_packet)) {
-                        printf("Request service: Sent incomplete test response: %d bytes\n", n);
-                    } else {
-                        printf("Request service: Test response sent successfully\n");
-                    }
-                } else {
-                    // Atualiza a soma total
-                    pthread_mutex_lock(&sum_mutex);
-                    total_sum += received_packet.data.req.value;
-                    pthread_mutex_unlock(&sum_mutex);
-
-                    // Envia resposta com a soma atual
-                    packet response_packet;
-                    response_packet.type = REQ_ACK;
-                    response_packet.data.resp.seqn = received_packet.data.req.seqn;
-                    response_packet.data.resp.value = total_sum;
-                    response_packet.data.resp.status = 0;
-
-                    printf("Request service: Sending REQ_ACK with total_sum %d\n", total_sum);
-
-                    int n = sendto(sockfd, &response_packet, sizeof(response_packet), 0,
-                                 (struct sockaddr *)&client_addr, sizeof(client_addr));
-                    if (n < 0) {
-                        perror("ERROR sending response");
-                    } else if (n != sizeof(response_packet)) {
-                        printf("Request service: Sent incomplete packet: %d bytes\n", n);
-                    } else {
-                        printf("Request service: Response sent successfully\n");
-                    }
-                }
-            } else {
-                printf("Request service: Received invalid packet type: %d\n", received_packet.type);
+        if (n < 0) {
+            if (errno != EINTR) {  // Ignora interrupções
+                perror("ERROR receiving request");
             }
+            continue;
         }
-        usleep(100000);  // Evita consumo excessivo de CPU (100ms)
+
+        if (n != sizeof(received_packet)) {
+            printf("Received incomplete packet: %d bytes\n", (int)n);
+            continue;
+        }
+
+        printf("Request service: Processing packet from %s:%d (type=%d)\n",
+               inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port),
+               received_packet.type);
+
+        // Processa a requisição
+        packet response_packet;
+        memset(&response_packet, 0, sizeof(response_packet));
+        response_packet.type = REQ_ACK;
+        response_packet.data.resp.seqn = received_packet.data.req.seqn;
+
+        if (received_packet.type != REQ) {
+            printf("Request service: Ignoring non-request packet type: %d\n", received_packet.type);
+            continue;
+        }
+
+        // Verifica se somos o primário
+        if (!is_primary()) {
+            printf("Request service: Not primary, sending error response\n");
+            response_packet.data.resp.value = get_current_sum();  // Retorna soma atual
+            response_packet.data.resp.status = 1;  // Status de erro - não é primário
+        } else {
+            printf("Request service: Processing value %d (seqn=%lld)\n",
+                   received_packet.data.req.value, received_packet.data.req.seqn);
+
+            // Atualiza o estado
+            int current_sum = get_current_sum();
+            int new_sum = current_sum + received_packet.data.req.value;
+            int update_success = (update_state(new_sum, received_packet.data.req.seqn) == 0);
+
+            // Pega o valor atualizado após a replicação
+            current_sum = get_current_sum();
+
+            // Prepara resposta com o valor ATUAL
+            response_packet.data.resp.value = current_sum;  // Sempre usa o valor atual
+            response_packet.data.resp.status = update_success ? 0 : 2;
+
+            printf("Request service: State update %s (old_sum=%d, new_sum=%d)\n",
+                   update_success ? "successful" : "failed",
+                   current_sum, new_sum);
+        }
+
+        // Envia a resposta (tenta algumas vezes)
+        int max_retries = 3;
+        int retry;
+        for (retry = 0; retry < max_retries; retry++) {
+            printf("Request service: Sending response (attempt %d) to %s:%d (sum=%d)\n",
+                   retry + 1, inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port),
+                   response_packet.data.resp.value);
+
+            n = sendto(sockfd, &response_packet, sizeof(response_packet), 0,
+                      (struct sockaddr *)&client_addr, client_len);
+
+            if (n == sizeof(response_packet)) {
+                printf("Request service: Response sent successfully\n");
+                break;
+            }
+
+            if (n < 0) {
+                perror("ERROR sending response");
+            } else {
+                printf("Request service: Sent incomplete packet: %d bytes\n", (int)n);
+            }
+
+            usleep(100000);  // Espera 100ms antes de tentar novamente
+        }
+
+        if (retry == max_retries) {
+            printf("Request service: Failed to send response after %d attempts\n", max_retries);
+        }
     }
 
     close(sockfd);
-}
-
-void *discovery_thread(void *arg) {
-    discovery_service(*((int *)arg));
     return NULL;
 }
 
-void *request_thread(void *arg) {
-    request_service(*((int *)arg));
-    return NULL;
+void init_server(int port) {
+    printf("Starting server on port %d...\n", port);
+    
+    // Inicia o gerenciador de replicação
+    init_replication_manager(port, port == 2000);  // Porta 2000 é o primário
+    
+    // Inicia as threads de serviço
+    pthread_t discovery_thread_id, request_thread_id;
+    pthread_create(&discovery_thread_id, NULL, (void*)discovery_service, (void*)(long)port);
+    pthread_create(&request_thread_id, NULL, request_service, (void*)(long)(port + 1));
+    
+    // Aguarda as threads terminarem
+    pthread_join(discovery_thread_id, NULL);
+    pthread_join(request_thread_id, NULL);
+    
+    // Finaliza o gerenciador de replicação
+    stop_replication_manager();
 }
 
-void start_server(int port) {
-    pthread_t disc_thread, req_thread;
-    int disc_port = port;
-    int req_port = port + 1;
-
-    // Inicia o serviço de descoberta em uma thread
-    if (pthread_create(&disc_thread, NULL, discovery_thread, &disc_port) != 0) {
-        perror("ERROR creating discovery thread");
-        return;
-    }
-
-    // Inicia o serviço de requisições em outra thread
-    if (pthread_create(&req_thread, NULL, request_thread, &req_port) != 0) {
-        perror("ERROR creating request thread");
-        return;
-    }
-
-    // Aguarda as threads terminarem (não deve acontecer normalmente)
-    pthread_join(disc_thread, NULL);
-    pthread_join(req_thread, NULL);
-
-    // Limpa os recursos
-    pthread_mutex_destroy(&sum_mutex);
+void stop_server() {
+    running = 0;
 }
 
 void ServerMain(const char* port) {
@@ -297,5 +310,5 @@ void ServerMain(const char* port) {
         fprintf(stderr, "Invalid port number\n");
         return;
     }
-    start_server(port_num);
+    init_server(port_num);
 }

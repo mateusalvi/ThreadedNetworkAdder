@@ -5,16 +5,12 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
 #include <arpa/inet.h>
+#include <sys/socket.h>
+#include <pthread.h>
 #include <stdbool.h>
-#include <errno.h>
+#include "config.h"
 #include "server_prot.h"
-
-#define MAX_MESSAGE_LEN 256
-#define MAX_CLIENTS 10
 
 // Estrutura para armazenar informações do cliente
 typedef struct {
@@ -32,5 +28,9 @@ bool TestServerConnection(const char *ip, int port);
 
 // Funções auxiliares
 CLIENT_INFO NewClientStruct(int id, char *ip, int port);
+
+// Funções exportadas
+void* addRequestListenerThread(void* arg);
+void* addRequestThread(void* arg);
 
 #endif // DISCOVERY_H

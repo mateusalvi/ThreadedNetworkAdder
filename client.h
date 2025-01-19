@@ -1,5 +1,5 @@
-#ifndef _CLIENT_
-#define _CLIENT_
+#ifndef CLIENT_H
+#define CLIENT_H
 
 /*##########################################################
 # INF01151 - Sistemas Operacionais II N - Turma A (2024/2) #
@@ -11,12 +11,10 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
 #include <arpa/inet.h>
+#include <sys/socket.h>
 #include <pthread.h>
-#include <errno.h>
+#include "server_prot.h"
 #include "processing.h"
 #include "discovery.h"
 
@@ -26,4 +24,6 @@ void RunClient(int port);
 // Função para processar entrada do usuário
 void* ClientInputSubprocess(void* arg);
 
-#endif
+void ClientMain(const char* port);
+
+#endif // CLIENT_H

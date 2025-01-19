@@ -5,51 +5,55 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
 #include <arpa/inet.h>
+#include <sys/socket.h>
 #include <pthread.h>
-#include <errno.h>
-
-#define MAX_MESSAGE_LEN 256
-#define SOCKET_TIMEOUT_MS 100  // 100ms timeout
+#include "config.h"
+#include "replication.h"
 
 // Tipos de pacotes
 typedef enum {
-    DESC,       // Descoberta de servidor
-    DESC_ACK,   // Resposta de descoberta
-    REQ,        // Requisição de adição
-    REQ_ACK     // Resposta de adição
+    DESC,       // Discovery request
+    DESC_ACK,   // Discovery response
+    REQ,        // Request
+    REQ_ACK     // Request response
 } packet_type;
 
-// Estrutura de requisição
+// Estrutura para pacotes de descoberta
 typedef struct {
-    long long seqn;    // Número de sequência
-    int value;         // Valor a ser somado
+    int port;           // Porta para comunicação
+} discovery_data;
+
+// Estrutura para pacotes de requisição
+typedef struct {
+    long long seqn;     // Número de sequência
+    int value;          // Valor a ser somado
 } request_data;
 
-// Estrutura de resposta
+// Estrutura para pacotes de resposta
 typedef struct {
-    long long seqn;    // Número de sequência
-    int value;         // Valor atual da soma
-    int status;        // Status da operação (0 = sucesso, outros = erro)
+    long long seqn;     // Número de sequência
+    int value;          // Soma atual
+    int status;         // Status da operação
 } response_data;
+
+// União para os dados do pacote
+typedef union {
+    discovery_data disc;
+    request_data req;
+    response_data resp;
+} packet_data;
 
 // Estrutura do pacote
 typedef struct {
-    packet_type type;  // Tipo do pacote
-    union {
-        request_data req;    // Dados da requisição
-        response_data resp;  // Dados da resposta
-    } data;
+    packet_type type;   // Tipo do pacote
+    packet_data data;   // Dados do pacote
 } packet;
 
-// Funções do servidor
-void ServerMain(const char* port);
-void start_server(int port);
-void discovery_service(int port);
-void request_service(int port);
-int receive_and_decode_message(int sockfd, packet *received_packet, struct sockaddr_in *client_addr);
+// Funções exportadas
+void init_server(int port);
+void stop_server(void);
+void *discovery_thread(void *arg);
+void *request_thread(void *arg);
 
 #endif // SERVER_PROT_H

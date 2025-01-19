@@ -7,35 +7,23 @@
 CC=gcc
 CFLAGS=-Wall -pthread
 LDFLAGS=-lpthread
+DEPS = server_prot.h discovery.h replication.h client.h
+OBJ_SERVER = server_main.o server_prot.o discovery.o replication.o
+OBJ_CLIENT = client_main.o client.o
 
-all: RunClient RunServer
+%.o: %.c $(DEPS)
+	$(CC) -c -o $@ $< $(CFLAGS)
 
-RunClient: RunClient.o discovery.o processing.o client.o
-	$(CC) RunClient.o discovery.o processing.o client.o -o RunClient $(LDFLAGS)
+all: RunServer RunClient
 
-RunServer: RunServer.o server_prot.o discovery.o processing.o
-	$(CC) RunServer.o server_prot.o discovery.o processing.o -o RunServer $(LDFLAGS)
+RunServer: $(OBJ_SERVER)
+	$(CC) -o $@ $^ $(CFLAGS)
 
-RunClient.o: RunClient.c client.h
-	$(CC) $(CFLAGS) -c RunClient.c
-
-RunServer.o: RunServer.c server_prot.h
-	$(CC) $(CFLAGS) -c RunServer.c
-
-server_prot.o: server_prot.c server_prot.h discovery.h
-	$(CC) $(CFLAGS) -c server_prot.c
-
-discovery.o: discovery.c discovery.h
-	$(CC) $(CFLAGS) -c discovery.c
-
-processing.o: processing.c processing.h
-	$(CC) $(CFLAGS) -c processing.c
-
-client.o: client.c client.h discovery.h processing.h
-	$(CC) $(CFLAGS) -c client.c
+RunClient: $(OBJ_CLIENT)
+	$(CC) -o $@ $^ $(CFLAGS)
 
 clean:
-	rm -f *.o RunClient RunServer
+	rm -f *.o RunServer RunClient
 
 .PHONY: all clean
 
