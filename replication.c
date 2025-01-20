@@ -99,10 +99,14 @@ static void process_replication_message(replica_message* msg, struct sockaddr_in
             if(!rm.is_primary) {
                 // Atualiza estado local
                 pthread_mutex_lock(&rm.state_mutex);
+                int old_sum = rm.current_sum;
                 rm.current_sum = msg->current_sum;
                 rm.last_seqn = msg->last_seqn;
                 rm.received_initial_state = 1;  // Marca que recebemos o estado inicial
                 pthread_mutex_unlock(&rm.state_mutex);
+                
+                log_message(LOG_INFO, "Received state update from primary: old_sum=%d, new_sum=%d, seqn=%lld\n",
+                          old_sum, msg->current_sum, msg->last_seqn);
                 
                 // Envia confirmação
                 replica_message response;
@@ -159,6 +163,19 @@ static void process_replication_message(replica_message* msg, struct sockaddr_in
             
         case VICTORY:
             handle_victory_declaration(msg, sender_addr);
+            break;
+            
+        case VICTORY_ACK:
+            // Atualiza status da réplica que confirmou a vitória
+            pthread_mutex_lock(&rm.state_mutex);
+            for(int i = 0; i < rm.replica_count; i++) {
+                if(rm.replicas[i].id == msg->replica_id) {
+                    rm.replicas[i].state_confirmed = 1;
+                    log_message(LOG_INFO, "Replica %d acknowledged victory\n", msg->replica_id);
+                    break;
+                }
+            }
+            pthread_mutex_unlock(&rm.state_mutex);
             break;
     }
 }
@@ -716,15 +733,8 @@ static void handle_election_start(replica_message* msg, struct sockaddr_in* send
             log_message(LOG_INFO, "Sent election response to replica %d (my ID %d is higher)\n",
                       msg->replica_id, rm.my_id);
             
-            // DEPOIS: Espera um pouco antes de iniciar sua própria eleição
-            usleep(100000);  // 100ms
-            
-            // Só inicia eleição se não estiver em uma
-            if (!rm.election_in_progress) {
-                start_election();
-            } else {
-                log_message(LOG_INFO, "Already in election, not starting new one\n");
-            }
+            // DEPOIS: Inicia sua própria eleição imediatamente
+            start_election();
         } else {
             log_message(LOG_INFO, "Ignoring election from higher ID %d (my_id=%d)\n",
                       msg->replica_id, rm.my_id);
@@ -735,216 +745,90 @@ static void handle_election_start(replica_message* msg, struct sockaddr_in* send
 }
 
 static void handle_election_response(replica_message* msg) {
-    if (rm.election_in_progress) {
-        if (msg->replica_id > rm.my_id) {
-            log_message(LOG_INFO, "Received response from higher ID %d, stepping down\n",
-                      msg->replica_id);
-            rm.election_in_progress = 0;  // Desiste da eleição
-        } else {
-            log_message(LOG_INFO, "Ignoring response from lower ID %d\n",
-                      msg->replica_id);
-        }
+    pthread_mutex_lock(&rm.state_mutex);
+    
+    if (msg->replica_id > rm.my_id) {
+        log_message(LOG_INFO, "Received response from higher ID %d, stepping down\n",
+                  msg->replica_id);
+        rm.election_in_progress = 0;  // Desiste da eleição
     } else {
-        log_message(LOG_INFO, "Received response but not in election\n");
+        log_message(LOG_INFO, "Ignoring response from lower ID %d\n",
+                  msg->replica_id);
     }
+    
+    pthread_mutex_unlock(&rm.state_mutex);
 }
 
 static void handle_victory_declaration(replica_message* msg, struct sockaddr_in* sender_addr) {
-    // Aceita vitória mesmo se estiver em eleição
+    pthread_mutex_lock(&rm.state_mutex);
+    
+    // Só processa vitória se for de uma eleição em andamento ou se for do primário atual
+    if (!rm.election_in_progress && msg->replica_id != rm.primary_id) {
+        pthread_mutex_unlock(&rm.state_mutex);
+        return;
+    }
+    
     log_message(LOG_INFO, "Received victory from %d (my_id=%d, was_primary=%d, in_election=%d)\n",
               msg->replica_id, rm.my_id, rm.is_primary, rm.election_in_progress);
+    
+    // Atualiza estado local
+    rm.is_primary = 0;
+    rm.primary_id = msg->replica_id;
+    rm.election_in_progress = 0;
     
     // Confirma recebimento da vitória
     replica_message ack;
     memset(&ack, 0, sizeof(ack));
-    ack.type = VICTORY_ACK;  // Usa VICTORY_ACK como confirmação
+    ack.type = VICTORY_ACK;
     ack.replica_id = rm.my_id;
     ack.timestamp = time(NULL);
     
-    // Envia confirmação várias vezes para garantir entrega
-    struct sockaddr_in winner_addr;
-    memset(&winner_addr, 0, sizeof(winner_addr));
-    winner_addr.sin_family = AF_INET;
-    winner_addr.sin_addr.s_addr = inet_addr("127.0.0.1");
+    // Envia confirmação uma única vez
+    sendto(replication_socket, &ack, sizeof(ack), 0,
+           (struct sockaddr*)sender_addr, sizeof(*sender_addr));
     
-    // Procura porta do vencedor
-    for (int i = 0; i < rm.replica_count; i++) {
-        if (rm.replicas[i].id == msg->replica_id) {
-            winner_addr.sin_port = rm.replicas[i].addr.sin_port;
-            break;
-        }
-    }
+    log_message(LOG_INFO, "Sent victory ACK to new primary %d\n", msg->replica_id);
     
-    // Envia confirmação várias vezes
-    for (int i = 0; i < 3; i++) {
-        ssize_t sent = sendto(replication_socket, &ack, sizeof(ack), 0,
-               (const struct sockaddr*)&winner_addr, sizeof(winner_addr));
-        log_message(LOG_INFO, "Sent victory confirmation to winner %d (bytes=%zd)\n", 
-                  msg->replica_id, sent);
-        usleep(10000); // 10ms entre tentativas
-    }
-    
-    // Atualiza estado
-    rm.primary_id = msg->replica_id;
-    rm.current_sum = msg->current_sum;
-    rm.last_seqn = msg->last_seqn;
-    rm.is_primary = 0;  // Garante que não sou primário
-    rm.election_in_progress = 0;  // Termina qualquer eleição em andamento
-    
-    log_message(LOG_INFO, "Updated state: primary=%d, sum=%d, seqn=%lld\n",
-              rm.primary_id, rm.current_sum, rm.last_seqn);
+    pthread_mutex_unlock(&rm.state_mutex);
 }
 
 // Atualiza o estado do servidor
 int update_state(int new_sum, long long seqn) {
     pthread_mutex_lock(&rm.state_mutex);
     
-    // Se for primário, precisa confirmar com todas as réplicas
+    // Atualiza estado local
+    rm.current_sum = new_sum;
+    rm.last_seqn = seqn;
+    
+    // Se sou primário, propaga atualização para réplicas
     if (rm.is_primary) {
-        log_message(LOG_INFO, "Primary updating state: old_sum=%d, new_sum=%d, seqn=%lld\n",
-                  rm.current_sum, new_sum, seqn);
-        
-        // Prepara mensagem de atualização
         replica_message msg;
         memset(&msg, 0, sizeof(msg));
         msg.type = STATE_UPDATE;
         msg.replica_id = rm.my_id;
-        msg.primary_id = rm.my_id;
-        msg.current_sum = new_sum;
-        msg.last_seqn = seqn;
+        msg.current_sum = rm.current_sum;
+        msg.last_seqn = rm.last_seqn;
         msg.timestamp = time(NULL);
         
-        // Reseta confirmações
-        for (int i = 0; i < rm.replica_count; i++) {
-            rm.replicas[i].state_confirmed = 0;
-        }
-        
-        // Envia atualização para todas as réplicas
+        // Envia para todas as réplicas
         int updates_sent = 0;
         for (int i = 0; i < rm.replica_count; i++) {
-            if (rm.replicas[i].id != rm.my_id) {
-                // Tenta enviar várias vezes
-                for (int retry = 0; retry < 3; retry++) {
-                    sendto(replication_socket, &msg, sizeof(msg), 0,
-                           (const struct sockaddr*)&rm.replicas[i].addr, sizeof(rm.replicas[i].addr));
-                    log_message(LOG_INFO, "Sent state update to replica %d (attempt %d): sum=%d, seqn=%lld\n",
-                              rm.replicas[i].id, retry+1, new_sum, seqn);
-                    usleep(10000); // 10ms entre tentativas
-                }
+            if (rm.replicas[i].id != rm.my_id && rm.replicas[i].is_alive) {
+                sendto(replication_socket, &msg, sizeof(msg), 0,
+                       (struct sockaddr*)&rm.replicas[i].addr, sizeof(rm.replicas[i].addr));
+                log_message(LOG_INFO, "Sent state update to replica %d: sum=%d, seqn=%lld\n",
+                          rm.replicas[i].id, new_sum, seqn);
                 updates_sent++;
             }
         }
         
         if (updates_sent == 0) {
-            log_message(LOG_INFO, "No other replicas to update\n");
-            rm.current_sum = new_sum;
-            rm.last_seqn = seqn;
-            pthread_mutex_unlock(&rm.state_mutex);
-            return 1;
-        }
-        
-        // Aguarda confirmações
-        struct timeval tv;
-        tv.tv_sec = 2;  // Aumenta timeout para 2 segundos
-        tv.tv_usec = 0;
-        setsockopt(replication_socket, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-        
-        time_t start_time = time(NULL);
-        int confirmations = 0;
-        int max_retries = 3;
-        int retry_count = 0;
-        
-        while (retry_count < max_retries) {
-            // Conta confirmações
-            confirmations = 0;
-            for (int i = 0; i < rm.replica_count; i++) {
-                if (rm.replicas[i].id != rm.my_id && rm.replicas[i].state_confirmed) {
-                    confirmations++;
-                }
-            }
-            
-            // Se todas confirmaram, sucesso
-            if (confirmations == updates_sent) {
-                log_message(LOG_INFO, "All replicas confirmed state update\n");
-                break;
-            }
-            
-            // Se timeout, reenviar para quem não confirmou
-            if (time(NULL) - start_time >= 2) {
-                log_message(LOG_INFO, "Timeout waiting for confirmations (%d/%d), retrying...\n",
-                          confirmations, updates_sent);
-                
-                // Reenvia para réplicas que não confirmaram
-                for (int i = 0; i < rm.replica_count; i++) {
-                    if (rm.replicas[i].id != rm.my_id && !rm.replicas[i].state_confirmed) {
-                        sendto(replication_socket, &msg, sizeof(msg), 0,
-                               (const struct sockaddr*)&rm.replicas[i].addr, sizeof(rm.replicas[i].addr));
-                        log_message(LOG_INFO, "Resending state update to replica %d: sum=%d, seqn=%lld\n",
-                                  rm.replicas[i].id, new_sum, seqn);
-                    }
-                }
-                
-                start_time = time(NULL);
-                retry_count++;
-            }
-            
-            // Processa confirmações
-            replica_message response;
-            struct sockaddr_in sender_addr;
-            socklen_t addr_len = sizeof(sender_addr);
-            
-            ssize_t recv_len = recvfrom(replication_socket, &response, sizeof(response), 0,
-                                      (struct sockaddr*)&sender_addr, &addr_len);
-            
-            if (recv_len > 0 && response.type == STATE_ACK) {
-                // Marca réplica como confirmada
-                for (int i = 0; i < rm.replica_count; i++) {
-                    if (rm.replicas[i].id == response.replica_id) {
-                        if (!rm.replicas[i].state_confirmed) {
-                            rm.replicas[i].state_confirmed = 1;
-                            log_message(LOG_INFO, "Replica %d confirmed state update\n", response.replica_id);
-                        }
-                        break;
-                    }
-                }
-            }
-        }
-        
-        // Restaura timeout original
-        tv.tv_sec = 0;
-        tv.tv_usec = 100000;  // 100ms
-        setsockopt(replication_socket, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-        
-        // Atualiza estado apenas se maioria confirmou
-        if (confirmations >= updates_sent/2) {
-            log_message(LOG_INFO, "Majority of replicas confirmed (%d/%d), updating state\n",
-                      confirmations, updates_sent);
-            rm.current_sum = new_sum;
-            rm.last_seqn = seqn;
-            pthread_mutex_unlock(&rm.state_mutex);
-            return 1;
-        } else {
-            log_message(LOG_ERROR, "Failed to get confirmation from majority of replicas (%d/%d)\n",
-                      confirmations, updates_sent);
-            pthread_mutex_unlock(&rm.state_mutex);
-            return 0;
-        }
-    } else {
-        // Se não for primário, apenas atualiza o estado local
-        if (seqn > rm.last_seqn) {
-            log_message(LOG_INFO, "Backup updating state: old_sum=%d, new_sum=%d, seqn=%lld\n",
-                      rm.current_sum, new_sum, seqn);
-            rm.current_sum = new_sum;
-            rm.last_seqn = seqn;
-            pthread_mutex_unlock(&rm.state_mutex);
-            return 1;
-        } else {
-            log_message(LOG_WARN, "Ignoring old state update: current_seqn=%lld, received_seqn=%lld\n",
-                      rm.last_seqn, seqn);
-            pthread_mutex_unlock(&rm.state_mutex);
-            return 0;
+            log_message(LOG_INFO, "No replicas to update\n");
         }
     }
+    
+    pthread_mutex_unlock(&rm.state_mutex);
+    return 0;
 }
 
 // Serviço de verificação do primário
@@ -983,14 +867,16 @@ static void check_primary_status(void) {
                 }
             } else {
                 // Se o primário não responde por PRIMARY_TIMEOUT segundos
-                if (!rm.election_in_progress && rm.received_initial_state) {
-                    rm.replicas[i].is_alive = 0;
+                if (rm.received_initial_state) {
+                    rm.replicas[i].is_alive = 0;  // Marca primário como morto
+                    pthread_mutex_unlock(&rm.state_mutex);  // Libera mutex antes de iniciar eleição
+                    
                     log_message(LOG_INFO, "Primary %d is down, starting election\n", rm.primary_id);
                     start_election();  // Inicia eleição quando o primário falha
+                    return;  // Retorna pois já liberou o mutex
                 } else {
-                    log_message(LOG_INFO, "Primary %d is down but %s\n", 
-                              rm.primary_id,
-                              !rm.received_initial_state ? "haven't received initial state" : "election already in progress");
+                    log_message(LOG_INFO, "Primary %d is down but haven't received initial state\n", 
+                              rm.primary_id);
                 }
             }
             break;
@@ -998,8 +884,10 @@ static void check_primary_status(void) {
     }
     
     if (!primary_found) {
+        pthread_mutex_unlock(&rm.state_mutex);  // Libera mutex antes de iniciar eleição
         log_message(LOG_INFO, "Primary check: Primary %d not found in replica list\n", rm.primary_id);
         start_election();
+        return;  // Retorna pois já liberou o mutex
     }
     
     pthread_mutex_unlock(&rm.state_mutex);
@@ -1007,12 +895,11 @@ static void check_primary_status(void) {
 
 // Inicia uma eleição
 static void start_election(void) {
-    if (rm.election_in_progress) return;
+    log_message(LOG_INFO, "Starting election process...\n");
     
     pthread_mutex_lock(&rm.state_mutex);
-    
-    log_message(LOG_INFO, "Starting election process...\n");
     rm.election_in_progress = 1;
+    pthread_mutex_unlock(&rm.state_mutex);
     
     // Verifica réplicas vivas
     time_t now = time(NULL);
@@ -1028,9 +915,14 @@ static void start_election(void) {
     }
     
     if (!has_higher_alive) {
+        pthread_mutex_lock(&rm.state_mutex);
         // Torna-se primário
         rm.is_primary = 1;
         rm.primary_id = rm.my_id;
+        rm.election_in_progress = 0;  // Termina eleição
+        pthread_mutex_unlock(&rm.state_mutex);
+        
+        log_message(LOG_INFO, "No higher ID alive, declaring victory\n");
         
         // Envia mensagem de vitória
         replica_message msg;
@@ -1038,18 +930,39 @@ static void start_election(void) {
         msg.type = VICTORY;
         msg.replica_id = rm.my_id;
         msg.timestamp = time(NULL);
+        msg.current_sum = rm.current_sum;  // Envia estado atual
+        msg.last_seqn = rm.last_seqn;
         
         // Envia para todas as réplicas
         for (int i = 0; i < rm.replica_count; i++) {
-            if (rm.replicas[i].id != rm.my_id) {
-                sendto(replication_socket, &msg, sizeof(msg), 0,
-                       (const struct sockaddr*)&rm.replicas[i].addr, sizeof(rm.replicas[i].addr));
+            if (rm.replicas[i].id != rm.my_id && rm.replicas[i].is_alive) {
+                log_message(LOG_INFO, "Sending victory to %d\n", rm.replicas[i].id);
+                for (int j = 0; j < 3; j++) {  // Envia 3 vezes
+                    sendto(replication_socket, &msg, sizeof(msg), 0,
+                           (struct sockaddr*)&rm.replicas[i].addr, sizeof(rm.replicas[i].addr));
+                    usleep(10000); // 10ms entre tentativas
+                }
             }
         }
+    } else {
+        // Envia START_ELECTION para todas as réplicas com ID maior
+        log_message(LOG_INFO, "Found higher ID alive, starting election process\n");
         
-        log_message(LOG_INFO, "Won election, became primary\n");
+        replica_message msg;
+        memset(&msg, 0, sizeof(msg));
+        msg.type = START_ELECTION;
+        msg.replica_id = rm.my_id;
+        msg.timestamp = time(NULL);
+        
+        for (int i = 0; i < rm.replica_count; i++) {
+            if (rm.replicas[i].id > rm.my_id && rm.replicas[i].is_alive) {
+                log_message(LOG_INFO, "Sending election start to %d\n", rm.replicas[i].id);
+                for (int j = 0; j < 3; j++) {  // Envia 3 vezes
+                    sendto(replication_socket, &msg, sizeof(msg), 0,
+                           (struct sockaddr*)&rm.replicas[i].addr, sizeof(rm.replicas[i].addr));
+                    usleep(10000); // 10ms entre tentativas
+                }
+            }
+        }
     }
-    
-    rm.election_in_progress = 0;
-    pthread_mutex_unlock(&rm.state_mutex);
 }
