@@ -22,7 +22,7 @@
 volatile sig_atomic_t stop = 0;
 
 void handle_sigint(int sig) {
-    stop = 1;
+    exit(0);
 }
 
 void* ClientInputSubprocess(void* arg) {

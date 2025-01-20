@@ -7,6 +7,7 @@
 #include "server_prot.h"
 #include "discovery.h"
 #include "replication.h"
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -304,8 +305,14 @@ void stop_server() {
     running = 0;
 }
 
+void handle_sigint(int sig) {
+    exit(0);
+}
+
 void ServerMain(const char* port) {
     int port_num = atoi(port);
+    struct sigaction sa;
+    sigaction(SIGINT, &sa, NULL);
     if (port_num <= 0) {
         fprintf(stderr, "Invalid port number\n");
         return;
