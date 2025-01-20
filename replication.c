@@ -1,39 +1,38 @@
 #include "replication.h"
-#include "config.h"
 #include "discovery.h"
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <unistd.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
-#include <pthread.h>
-#include <time.h>
+#include "config.h"
 #include <stdarg.h>
 
-// Protótipos de funções internas
-static void* heartbeat_service(void* arg);
-static void* primary_check_service(void* arg);
+// Níveis de log
+typedef enum {
+    LOG_INFO = 1,
+    LOG_WARN,
+    LOG_ERROR
+} log_level;
+
+// Gerenciador de replicação global
+static replication_manager rm;
+
+// Socket de replicação
+static int replication_socket;
+
+// Flag para controle das threads
+static volatile int running = 1;
+
+// Protótipos de funções estáticas
 static void* replication_receiver_service(void* arg);
+static void* primary_check_service(void* arg);
 static void process_replication_message(replica_message* msg, struct sockaddr_in* sender_addr);
 static void add_replica(int replica_id);
 static void send_replica_list(int target_id);
-static void update_replica_list(replica_message* msg);
 static void start_election(void);
-static void check_primary_status(void);
 static void handle_election_start(replica_message* msg, struct sockaddr_in* sender_addr);
 static void handle_election_response(replica_message* msg);
 static void handle_victory_declaration(replica_message* msg, struct sockaddr_in* sender_addr);
 static void handle_state_update(replica_message* msg, struct sockaddr_in* sender_addr);
-
-// Níveis de log
-typedef enum {
-    LOG_DEBUG,
-    LOG_INFO,
-    LOG_WARN,
-    LOG_ERROR
-} log_level;
+static void check_primary_status(void);
+static void log_message(log_level level, const char* format, ...);
+static int send_join_request(void);
 
 // Função de log
 static void log_message(log_level level, const char* format, ...) {
@@ -41,20 +40,14 @@ static void log_message(log_level level, const char* format, ...) {
     va_start(args, format);
     
     switch(level) {
-        case LOG_DEBUG: fprintf(stderr, "[DEBUG] "); break;
-        case LOG_INFO:  fprintf(stderr, "[INFO] "); break;
-        case LOG_WARN:  fprintf(stderr, "[WARN] "); break;
+        case LOG_INFO: fprintf(stderr, "[INFO] "); break;
+        case LOG_WARN: fprintf(stderr, "[WARN] "); break;
         case LOG_ERROR: fprintf(stderr, "[ERROR] "); break;
     }
     
     vfprintf(stderr, format, args);
     va_end(args);
 }
-
-// Variáveis globais
-static replication_manager rm;
-static int replication_socket;
-static volatile int running = 1;
 
 // Processa mensagem de replicação recebida
 static void process_replication_message(replica_message* msg, struct sockaddr_in* sender_addr) {
@@ -115,7 +108,20 @@ static void process_replication_message(replica_message* msg, struct sockaddr_in
             break;
             
         case REPLICA_LIST_UPDATE:
-            update_replica_list(msg);
+            // Atualiza lista de réplicas
+            for (int i = 0; i < msg->replica_count; i++) {
+                int found = 0;
+                for (int j = 0; j < rm.replica_count; j++) {
+                    if (rm.replicas[j].id == msg->replicas[i].id) {
+                        rm.replicas[j] = msg->replicas[i];
+                        found = 1;
+                        break;
+                    }
+                }
+                if (!found && rm.replica_count < MAX_REPLICAS) {
+                    rm.replicas[rm.replica_count++] = msg->replicas[i];
+                }
+            }
             break;
             
         case START_ELECTION:
@@ -385,25 +391,50 @@ static void send_replica_list(int target_id) {
     pthread_mutex_unlock(&rm.state_mutex);
 }
 
-// Função para atualizar lista de réplicas locais
-static void update_replica_list(replica_message* msg) {
+// Adiciona uma nova réplica descoberta via broadcast
+void add_discovered_replica(const char* ip, int port) {
     pthread_mutex_lock(&rm.state_mutex);
     
-    log_message(LOG_INFO, "Updating replica list from primary (count=%d)\n",
-              msg->replica_count);
-    
-    // Atualiza lista de réplicas
-    rm.replica_count = msg->replica_count;
-    memcpy(rm.replicas, msg->replicas, sizeof(replica_info) * msg->replica_count);
-    
-    // Atualiza informações do primário
-    rm.primary_id = msg->primary_id;
-    
-    // Log das réplicas recebidas
+    // Procura se a réplica já existe
+    int found = 0;
     for (int i = 0; i < rm.replica_count; i++) {
-        log_message(LOG_INFO, "Replica %d: id=%d, alive=%d, is_primary=%d\n",
-                  i, rm.replicas[i].id, rm.replicas[i].is_alive,
-                  rm.replicas[i].id == rm.primary_id);
+        struct sockaddr_in* addr = &rm.replicas[i].addr;
+        if (addr->sin_addr.s_addr == inet_addr(ip) &&
+            ntohs(addr->sin_port) == port) {
+            // Atualiza timestamp
+            rm.replicas[i].last_heartbeat = time(NULL);
+            rm.replicas[i].is_alive = 1;
+            found = 1;
+            break;
+        }
+    }
+    
+    // Se não encontrou e há espaço, adiciona
+    if (!found && rm.replica_count < MAX_REPLICAS) {
+        // Configura endereço
+        struct sockaddr_in* addr = &rm.replicas[rm.replica_count].addr;
+        memset(addr, 0, sizeof(*addr));
+        addr->sin_family = AF_INET;
+        addr->sin_port = htons(port);
+        addr->sin_addr.s_addr = inet_addr(ip);
+        
+        // Configura outros campos
+        rm.replicas[rm.replica_count].id = rm.replica_count + 2000;  // IDs começam em 2000
+        rm.replicas[rm.replica_count].last_heartbeat = time(NULL);
+        rm.replicas[rm.replica_count].is_alive = 1;
+        rm.replicas[rm.replica_count].state_confirmed = 0;
+        
+        rm.replica_count++;
+        
+        log_message(LOG_INFO, "Added new replica %s:%d with ID %d\n", 
+                  ip, port, rm.replicas[rm.replica_count-1].id);
+        
+        // Se não estamos em eleição e não somos primário, inicia eleição
+        if (!rm.is_primary && !rm.election_in_progress) {
+            pthread_mutex_unlock(&rm.state_mutex);
+            start_election();
+            return;
+        }
     }
     
     pthread_mutex_unlock(&rm.state_mutex);

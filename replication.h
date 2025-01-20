@@ -76,5 +76,6 @@ void stop_replication_manager(void);
 int update_state(int new_sum, long long seqn);
 int is_primary(void);
 int get_current_sum(void);
+void add_discovered_replica(const char* ip, int port);  // Nova função para adicionar réplica descoberta
 
 #endif // REPLICATION_H

@@ -15,6 +15,7 @@
 typedef enum {
     DESC,       // Discovery request
     DESC_ACK,   // Discovery response
+    DESC_SERVER, // Server discovery (broadcast)
     REQ,        // Request
     REQ_ACK     // Request response
 } packet_type;

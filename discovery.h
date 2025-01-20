@@ -20,6 +20,8 @@ typedef struct {
 } CLIENT_INFO;
 
 // Funções de descoberta
+void init_discovery_service(int port, int req_port);
+void stop_discovery_service(void);
 void BroadcastSignIn(int port, char *returnMessage);
 void ListenForNewClients(int port);
 int ListenForAddRequest(int port, char *clientIP);

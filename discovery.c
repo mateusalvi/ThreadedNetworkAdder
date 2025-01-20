@@ -61,9 +61,10 @@ void init_discovery_service(int port, int req_port) {
         exit(1);
     }
     
-    // Configura o socket para reusar endereço
+    // Configura o socket para reusar endereço e permitir broadcast
     int opt = 1;
-    if (setsockopt(discovery_socket, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0) {
+    if (setsockopt(discovery_socket, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0 ||
+        setsockopt(discovery_socket, SOL_SOCKET, SO_BROADCAST, &opt, sizeof(opt)) < 0) {
         perror("Failed to set socket options");
         exit(1);
     }
@@ -81,7 +82,7 @@ void init_discovery_service(int port, int req_port) {
     struct sockaddr_in addr;
     memset(&addr, 0, sizeof(addr));
     addr.sin_family = AF_INET;
-    addr.sin_addr.s_addr = INADDR_ANY;
+    addr.sin_addr.s_addr = INADDR_ANY;  // Aceita conexões de qualquer interface
     addr.sin_port = htons(port);
     
     // Faz o bind
@@ -91,6 +92,23 @@ void init_discovery_service(int port, int req_port) {
     }
     
     printf("Discovery service listening on port %d...\n", port);
+    
+    // Configura endereço de broadcast
+    struct sockaddr_in broadcast_addr;
+    memset(&broadcast_addr, 0, sizeof(broadcast_addr));
+    broadcast_addr.sin_family = AF_INET;
+    broadcast_addr.sin_addr.s_addr = INADDR_BROADCAST;  // Endereço de broadcast
+    broadcast_addr.sin_port = htons(port);
+    
+    // Envia pacote de descoberta inicial via broadcast
+    packet discovery_packet;
+    discovery_packet.type = DESC_SERVER;  // Novo tipo para descoberta entre servidores
+    discovery_packet.data.disc.port = request_port;
+    
+    if (sendto(discovery_socket, &discovery_packet, sizeof(discovery_packet), 0,
+               (struct sockaddr*)&broadcast_addr, sizeof(broadcast_addr)) < 0) {
+        perror("Failed to send initial discovery packet");
+    }
     
     // Inicia thread de descoberta
     pthread_t discovery_thread;
@@ -134,39 +152,59 @@ static void* discovery_service(void* arg) {
 
 // Processa um pacote de descoberta
 static void handle_discovery_packet(struct sockaddr_in* client_addr) {
+    packet pkt;
+    socklen_t addr_len = sizeof(*client_addr);
+    
+    // Recebe o pacote
+    ssize_t recv_len = recvfrom(discovery_socket, &pkt, sizeof(pkt), 0,
+                               (struct sockaddr*)client_addr, &addr_len);
+                               
+    if (recv_len < 0) {
+        perror("Failed to receive discovery packet");
+        return;
+    }
+    
     pthread_mutex_lock(&clients_mutex);
     
-    // Procura cliente na lista
-    int found = 0;
-    for (int i = 0; i < client_count; i++) {
-        if (clients[i].addr.sin_addr.s_addr == client_addr->sin_addr.s_addr &&
-            clients[i].addr.sin_port == client_addr->sin_port) {
-            // Atualiza timestamp
-            clients[i].last_seen = time(NULL);
-            found = 1;
+    switch(pkt.type) {
+        case DESC:  // Cliente procurando servidor
+            // Envia resposta com porta do serviço
+            pkt.type = DESC_ACK;
+            pkt.data.disc.port = request_port;
+            
+            sendto(discovery_socket, &pkt, sizeof(pkt), 0,
+                   (struct sockaddr*)client_addr, sizeof(*client_addr));
             break;
-        }
+            
+        case DESC_SERVER:  // Outro servidor se anunciando
+            printf("Server discovered at %s:%d\n",
+                   inet_ntoa(client_addr->sin_addr),
+                   ntohs(client_addr->sin_port));
+                   
+            // Responde para o servidor saber nossa existência
+            pkt.type = DESC_SERVER;
+            pkt.data.disc.port = request_port;
+            
+            sendto(discovery_socket, &pkt, sizeof(pkt), 0,
+                   (struct sockaddr*)client_addr, sizeof(*client_addr));
+            
+            // Notifica o módulo de replicação sobre o novo servidor
+            add_discovered_replica(inet_ntoa(client_addr->sin_addr), pkt.data.disc.port);
+            break;
+            
+        case DESC_ACK:  // Resposta de outro servidor
+            printf("Server responded at %s:%d\n",
+                   inet_ntoa(client_addr->sin_addr),
+                   ntohs(client_addr->sin_port));
+                   
+            // Notifica o módulo de replicação
+            add_discovered_replica(inet_ntoa(client_addr->sin_addr), pkt.data.disc.port);
+            break;
+            
+        default:
+            break;
     }
     
-    // Se não encontrou e há espaço, adiciona
-    if (!found && client_count < MAX_CLIENTS) {
-        clients[client_count].addr = *client_addr;
-        clients[client_count].last_seen = time(NULL);
-        client_count++;
-        
-        printf("New client connected from %s:%d\n",
-               inet_ntoa(client_addr->sin_addr),
-               ntohs(client_addr->sin_port));
-    }
-    
-    // Envia resposta com porta do serviço de requisições
-    packet response;
-    response.type = DESC_ACK;
-    response.data.disc.port = request_port;
-    
-    sendto(discovery_socket, &response, sizeof(response), 0,
-           (struct sockaddr*)client_addr, sizeof(*client_addr));
-           
     pthread_mutex_unlock(&clients_mutex);
 }
 
