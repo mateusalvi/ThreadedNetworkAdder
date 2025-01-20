@@ -12,59 +12,57 @@
 #include <fcntl.h>
 #include "config.h"
 
-// Tipos de mensagens de replicação
+// Tipos de mensagem
 typedef enum {
-    JOIN_REQUEST,     // Pedido para juntar-se ao cluster
-    STATE_UPDATE,     // Atualização de estado
-    STATE_ACK,       // Confirmação de atualização de estado
-    HEARTBEAT,       // Heartbeat do primário
-    NEW_PRIMARY,     // Notificação de novo primário
-    PRIMARY_QUERY,   // Consulta se um servidor é primário
-    PRIMARY_RESPONSE, // Resposta confirmando que é primário
-    START_ELECTION,  // Inicia processo de eleição
-    ELECTION_VOTE,   // Voto em uma eleição
-    ELECTION_RESPONSE, // Resposta a uma eleição (usado no Bully Algorithm)
-    ELECTION_VICTORY // Anúncio do vencedor da eleição
+    HEARTBEAT = 1,
+    JOIN_REQUEST,
+    STATE_UPDATE,
+    STATE_ACK,
+    REPLICA_LIST_UPDATE,
+    START_ELECTION,
+    ELECTION_RESPONSE,
+    VICTORY,
+    VICTORY_ACK
 } message_type;
 
-// Estrutura para mensagens de replicação
+// Estrutura para informações de uma réplica
 typedef struct {
-    message_type type;          // Tipo da mensagem
-    int primary_id;            // ID do primário
-    int replica_id;           // ID da réplica
-    int current_sum;         // Soma atual
-    long long last_seqn;    // Último número de sequência
-    time_t timestamp;       // Timestamp da mensagem
-    int state_confirmed;    // Flag para confirmação de estado
-} replica_message;
+    int id;
+    int is_alive;
+    time_t last_heartbeat;
+    struct sockaddr_in addr;
+    int state_confirmed;
+} replica_info;
 
-// Estrutura para réplicas
+// Estrutura de mensagem de replicação
 typedef struct {
-    int id;                     // ID da réplica (porta)
-    struct sockaddr_in addr;    // Endereço da réplica
-    int is_alive;              // Se a réplica está viva
-    time_t last_heartbeat;     // Timestamp do último heartbeat
-    int state_confirmed;       // Se confirmou recebimento do último estado
-} replica;
+    message_type type;
+    int replica_id;
+    int primary_id;
+    int current_sum;
+    long long last_seqn;
+    time_t timestamp;
+    int replica_count;
+    replica_info replicas[10];
+} replica_message;
 
 // Estrutura do gerenciador de replicação
 typedef struct {
-    int my_id;                  // ID deste servidor
-    int primary_id;             // ID do servidor primário
-    int is_primary;             // Se este servidor é o primário
-    int current_sum;            // Soma atual
-    long long last_seqn;        // Último número de sequência
-    int received_initial_state; // Se recebemos o estado inicial
-    time_t last_primary_check;  // Último check do primário
-    time_t join_time;          // Momento em que a réplica se juntou
-    pthread_mutex_t state_mutex;// Mutex para o estado
-    replica replicas[MAX_REPLICAS];  // Lista de réplicas
-    int replica_count;          // Número de réplicas
-    int election_in_progress;    // Flag para indicar eleição em andamento
+    int my_id;
+    int is_primary;
+    int primary_id;
+    int current_sum;
+    long long last_seqn;
+    int received_initial_state;
+    int election_in_progress;
+    replica_info replicas[10];
+    int replica_count;
+    pthread_mutex_t state_mutex;
 } replication_manager;
 
 // Constantes
 #define MAX_REPLICAS 10
+#define PRIMARY_TIMEOUT 5
 #define HEARTBEAT_INTERVAL 1  // Intervalo de heartbeat em segundos
 #define CHECK_INTERVAL 1      // Intervalo de verificação do primário em segundos
 #define STATE_TIMEOUT 2       // Timeout para confirmação de estado em segundos

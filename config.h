@@ -14,6 +14,7 @@
 #define BASE_PORT 2000      // Porta base para servidores
 #define PRIMARY_PORT 2000   // Porta base do servidor primário
 #define PORT_STEP 4         // Incremento de porta entre servidores
+#define REPL_PORT_OFFSET 2  // Offset para portas de replicação (porta base + 2)
 
 // Timeouts e delays
 #define SOCKET_TIMEOUT_MS 500    // Timeout para operações de socket
