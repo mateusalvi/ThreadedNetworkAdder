@@ -776,6 +776,14 @@ static void handle_victory_declaration(replica_message* msg, struct sockaddr_in*
     rm.primary_id = msg->replica_id;
     rm.election_in_progress = 0;
     
+    // Atualiza o estado com o estado do novo primário
+    int old_sum = rm.current_sum;
+    rm.current_sum = msg->current_sum;
+    rm.last_seqn = msg->last_seqn;
+    
+    log_message(LOG_INFO, "Received state update from primary: old_sum=%d, new_sum=%d, seqn=%lld\n",
+              old_sum, msg->current_sum, msg->last_seqn);
+    
     // Confirma recebimento da vitória
     replica_message ack;
     memset(&ack, 0, sizeof(ack));

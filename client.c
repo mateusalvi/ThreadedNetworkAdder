@@ -52,11 +52,20 @@ int discover_server(int port, struct sockaddr_in* server_addr) {
         close(discovery_socket);
         return -1;
     }
+
+    // Configura timeout do socket
+    struct timeval tv;
+    tv.tv_sec = 1;  // 1 segundo de timeout
+    tv.tv_usec = 0;
+    if (setsockopt(discovery_socket, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) < 0) {
+        perror("ERROR setting socket timeout");
+        close(discovery_socket);
+        return -1;
+    }
     
     // Configura o endereço de broadcast
     memset(&broadcast_addr, 0, sizeof(broadcast_addr));
     broadcast_addr.sin_family = AF_INET;
-    broadcast_addr.sin_port = htons(port);
     broadcast_addr.sin_addr.s_addr = inet_addr(BROADCAST_ADDR);
     
     // Prepara o pacote de descoberta
@@ -75,24 +84,26 @@ int discover_server(int port, struct sockaddr_in* server_addr) {
         printf("Sending discovery packet to port %d...\n", port);
         
         // Configura o endereço do servidor
-        server_addr->sin_family = AF_INET;
-        server_addr->sin_port = htons(port);
-        server_addr->sin_addr.s_addr = inet_addr(BROADCAST_ADDR);
+        broadcast_addr.sin_port = htons(port);
         
         // Envia o pacote de descoberta
-        sendto(discovery_socket, &discovery_packet, sizeof(discovery_packet), 0,
-               (struct sockaddr*)server_addr, sizeof(*server_addr));
+        if (sendto(discovery_socket, &discovery_packet, sizeof(discovery_packet), 0,
+                  (struct sockaddr*)&broadcast_addr, sizeof(broadcast_addr)) < 0) {
+            perror("ERROR sending discovery packet");
+            continue;
+        }
                
-        // Espera a resposta
+        // Espera a resposta com timeout
         packet response;
         int n = recvfrom(discovery_socket, &response, sizeof(response), 0,
                         (struct sockaddr*)&recv_addr, &addr_len);
                         
         if (n < 0) {
-            if (errno != EAGAIN && errno != EWOULDBLOCK) {
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                printf("No response from port %d (timeout)\n", port);
+            } else {
                 perror("ERROR receiving discovery response");
             }
-            printf("No response from port %d\n", port);
             continue;
         }
         
@@ -100,9 +111,14 @@ int discover_server(int port, struct sockaddr_in* server_addr) {
         if (response.type == DESC_ACK) {
             request_port = response.data.resp.value;
             printf("Server found! Communication port: %d\n", request_port);
-            // Salva o IP do servidor
+            // Configura o endereço do servidor para uso posterior
+            memset(server_addr, 0, sizeof(*server_addr));
+            server_addr->sin_family = AF_INET;
+            server_addr->sin_port = htons(request_port);
             server_addr->sin_addr = recv_addr.sin_addr;
             break;
+        } else {
+            printf("Received invalid response type from port %d: %d\n", port, response.type);
         }
     }
     
@@ -112,71 +128,78 @@ int discover_server(int port, struct sockaddr_in* server_addr) {
 
 // Função para enviar requisição e receber resposta
 int send_request(int sockfd, struct sockaddr_in* req_addr, int value, long long* seqn) {
-    // Prepara e envia o pacote
-    packet request_packet;
-    memset(&request_packet, 0, sizeof(request_packet));
-    request_packet.type = REQ;
-    request_packet.data.req.seqn = (*seqn)++;
-    request_packet.data.req.value = value;
-
-    printf("Sending request: value=%d, seqn=%lld to %s:%d\n", 
-           value, request_packet.data.req.seqn,
-           inet_ntoa(req_addr->sin_addr), ntohs(req_addr->sin_port));
-
-    // Tenta enviar algumas vezes
     int max_retries = 3;
     int retry;
+
     for (retry = 0; retry < max_retries; retry++) {
+        // Prepara e envia o pacote
+        packet request_packet;
+        memset(&request_packet, 0, sizeof(request_packet));
+        request_packet.type = REQ;
+        request_packet.data.req.seqn = (*seqn)++;
+        request_packet.data.req.value = value;
+
+        printf("Sending request: value=%d, seqn=%lld to %s:%d\n", 
+               value, request_packet.data.req.seqn,
+               inet_ntoa(req_addr->sin_addr), ntohs(req_addr->sin_port));
+
+        // Tenta enviar
         ssize_t n = sendto(sockfd, &request_packet, sizeof(request_packet), 0,
                           (struct sockaddr *)req_addr, sizeof(*req_addr));
         
-        if (n == sizeof(request_packet)) {
-            break;  // Envio bem sucedido
+        if (n != sizeof(request_packet)) {
+            if (n < 0) {
+                perror("ERROR sending request");
+            } else {
+                printf("Sent incomplete packet: %d bytes\n", (int)n);
+            }
+            usleep(100000);  // 100ms entre tentativas
+            continue;
         }
+
+        // Aguarda a resposta
+        packet response_packet;
+        socklen_t addr_len = sizeof(*req_addr);
+        n = recvfrom(sockfd, &response_packet, sizeof(response_packet), 0,
+                    (struct sockaddr *)req_addr, &addr_len);
 
         if (n < 0) {
-            perror("ERROR sending request");
-        } else {
-            printf("Sent incomplete packet: %d bytes\n", (int)n);
-        }
-
-        if (retry < max_retries - 1) {
-            printf("Retrying send (attempt %d of %d)...\n", retry + 2, max_retries);
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                printf("Server not responding (timeout)\n");
+                // Se for timeout, indica que precisa procurar novo primário
+                return -2;
+            }
+            perror("ERROR receiving response");
             usleep(100000);  // 100ms entre tentativas
+            continue;
         }
+
+        if (n != sizeof(response_packet)) {
+            printf("Received incomplete response: %d bytes\n", (int)n);
+            continue;
+        }
+
+        if (response_packet.type != REQ_ACK) {
+            printf("Received invalid response type: %d\n", response_packet.type);
+            continue;
+        }
+
+        // Se o status é 1, significa que o servidor não é mais o primário
+        if (response_packet.data.resp.status == 1) {
+            printf("Server is not primary anymore\n");
+            return -2;  // Código especial para indicar que precisa procurar novo primário
+        }
+
+        printf("Received response: value=%d, seqn=%lld, status=%d\n", 
+               response_packet.data.resp.value, response_packet.data.resp.seqn,
+               response_packet.data.resp.status);
+
+        return response_packet.data.resp.value;
     }
 
-    if (retry == max_retries) {
-        printf("Failed to send request after %d attempts\n", max_retries);
-        return -1;
-    }
-
-    // Aguarda a resposta
-    packet response_packet;
-    socklen_t addr_len = sizeof(*req_addr);
-    ssize_t n = recvfrom(sockfd, &response_packet, sizeof(response_packet), 0,
-                        (struct sockaddr *)req_addr, &addr_len);
-
-    if (n < 0) {
-        perror("ERROR receiving response");
-        return -1;
-    }
-
-    if (n != sizeof(response_packet)) {
-        printf("Received incomplete response: %d bytes\n", (int)n);
-        return -1;
-    }
-
-    if (response_packet.type != REQ_ACK) {
-        printf("Received invalid response type: %d\n", response_packet.type);
-        return -1;
-    }
-
-    printf("Received response: value=%d, seqn=%lld, status=%d\n", 
-           response_packet.data.resp.value, response_packet.data.resp.seqn,
-           response_packet.data.resp.status);
-
-    return response_packet.data.resp.value;
+    // Se chegou aqui, é porque falhou todas as tentativas
+    // Indica que precisa procurar novo primário
+    return -2;
 }
 
 void RunClient(int port) {
@@ -201,7 +224,22 @@ void RunClient(int port) {
     }
 
     // Loop principal do cliente
-    int sockfd;
+    int sockfd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (sockfd < 0) {
+        perror("ERROR opening socket");
+        return;
+    }
+
+    // Configura timeout do socket
+    struct timeval tv;
+    tv.tv_sec = 1;  // 1 segundo de timeout
+    tv.tv_usec = 0;
+    if (setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) < 0) {
+        perror("ERROR setting socket timeout");
+        close(sockfd);
+        return;
+    }
+
     while (!stop) {
         int option;
         printf("\nChoose an option:\n");
@@ -251,6 +289,7 @@ void RunClient(int port) {
         
         if (server_port > 0) {
             printf("Connected to server at %s:%d\n", inet_ntoa(server_addr.sin_addr), server_port);
+            server_addr.sin_port = htons(server_port);
             
             while (!stop) {
                 printf("\nChoose an option:\n");
@@ -282,108 +321,88 @@ void RunClient(int port) {
                                 break;
                             }
 
-                            // Prepara o pacote de requisição
-                            sockfd = socket(AF_INET, SOCK_DGRAM, 0);
-                            if (sockfd < 0) {
-                                perror("ERROR opening socket");
-                                continue;
-                            }
-
-                            // Configura timeout do socket
-                            struct timeval tv;
-                            tv.tv_sec = 0;
-                            tv.tv_usec = SOCKET_TIMEOUT_MS * 1000;
-                            if (setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) < 0) {
-                                perror("ERROR setting timeout");
-                                close(sockfd);
-                                continue;
-                            }
-
-                            // Configura o endereço do servidor
-                            server_addr.sin_port = htons(server_port);
-
-                            // Envia a requisição e aguarda a resposta
                             int result = send_request(sockfd, &server_addr, value, &seqn);
+                            if (result == -2) {
+                                // Servidor não é mais primário, tenta descobrir novo primário
+                                printf("Server is not primary anymore. Searching for new primary...\n");
+                                server_port = discover_server(port, &server_addr);
+                                if (server_port > 0) {
+                                    printf("Found new primary at %s:%d\n", inet_ntoa(server_addr.sin_addr), server_port);
+                                    server_addr.sin_port = htons(server_port);
+                                    // Tenta enviar a requisição novamente
+                                    result = send_request(sockfd, &server_addr, value, &seqn);
+                                } else {
+                                    printf("Could not find new primary server\n");
+                                    break;
+                                }
+                            }
+                            
                             if (result < 0) {
-                                printf("Failed to communicate with server\n");
-                                close(sockfd);
+                                printf("Failed to send request\n");
                                 break;
                             }
 
                             printf("Current sum: %d\n", result);
-                            close(sockfd);
                         }
                         break;
+
                     case 2:
-                        printf("Enter file name: ");
-                        char file_name[256];
-                        if (fgets(file_name, sizeof(file_name), stdin) != NULL) {
-                            file_name[strcspn(file_name, "\n")] = 0;  // Remove newline
-                            FILE *file = fopen(file_name, "r");
-                            if (file == NULL) {
-                                perror("ERROR opening file");
-                                continue;
-                            }
+                        printf("Enter filename: ");
+                        char filename[256];
+                        if (fgets(filename, sizeof(filename), stdin) == NULL) {
+                            printf("Error reading filename\n");
+                            continue;
+                        }
+                        filename[strcspn(filename, "\n")] = 0;  // Remove newline
 
-                            // Loop para ler valores do arquivo e enviar
-                            while (fscanf(file, "%d", &value) == 1 && !stop) {
-                                // Prepara o pacote de requisição
-                                sockfd = socket(AF_INET, SOCK_DGRAM, 0);
-                                if (sockfd < 0) {
-                                    perror("ERROR opening socket");
-                                    continue;
-                                }
+                        FILE *file = fopen(filename, "r");
+                        if (file == NULL) {
+                            perror("ERROR opening file");
+                            continue;
+                        }
 
-                                // Configura timeout do socket
-                                struct timeval tv;
-                                tv.tv_sec = 0;
-                                tv.tv_usec = SOCKET_TIMEOUT_MS * 1000;
-                                if (setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) < 0) {
-                                    perror("ERROR setting timeout");
-                                    close(sockfd);
-                                    continue;
-                                }
-
-                                // Configura o endereço do servidor
-                                server_addr.sin_port = htons(server_port);
-
-                                // Envia a requisição e aguarda a resposta
-                                int result = send_request(sockfd, &server_addr, value, &seqn);
-                                if (result < 0) {
-                                    printf("Failed to communicate with server\n");
-                                    close(sockfd);
+                        while (fscanf(file, "%d", &value) == 1 && !stop) {
+                            int result = send_request(sockfd, &server_addr, value, &seqn);
+                            if (result == -2) {
+                                // Servidor não é mais primário, tenta descobrir novo primário
+                                printf("Server is not primary anymore. Searching for new primary...\n");
+                                server_port = discover_server(port, &server_addr);
+                                if (server_port > 0) {
+                                    printf("Found new primary at %s:%d\n", inet_ntoa(server_addr.sin_addr), server_port);
+                                    server_addr.sin_port = htons(server_port);
+                                    // Tenta enviar a requisição novamente
+                                    result = send_request(sockfd, &server_addr, value, &seqn);
+                                } else {
+                                    printf("Could not find new primary server\n");
                                     break;
                                 }
-
-                                printf("Current sum: %d\n", result);
-                                close(sockfd);
+                            }
+                            
+                            if (result < 0) {
+                                printf("Failed to send request\n");
+                                break;
                             }
 
-                            fclose(file);
+                            printf("Current sum: %d\n", result);
                         }
+
+                        fclose(file);
                         break;
+
                     case 3:
-                        printf("Exiting...\n");
                         stop = 1;
                         break;
+
                     default:
                         printf("Invalid option\n");
-                        continue;
+                        break;
                 }
-
-                if (stop) break;
             }
+        } else {
+            printf("Could not find server\n");
         }
-
-        if (++retries >= MAX_CLIENT_RETRIES) {
-            printf("Failed to connect to server after %d attempts\n", MAX_CLIENT_RETRIES);
-            break;
-        }
-
-        printf("Failed to connect to server. Retrying in 1 second...\n");
-        sleep(1);
     }
-    
-    // Aguarda a thread de entrada terminar
+
+    close(sockfd);
     pthread_join(input_thread, NULL);
 }
