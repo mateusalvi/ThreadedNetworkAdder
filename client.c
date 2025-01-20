@@ -25,14 +25,6 @@ void handle_sigint(int sig) {
     stop = 1;
 }
 
-void* ClientInputSubprocess(void* arg) {
-    // Esta thread agora só serve para capturar Ctrl+C
-    while (!stop) {
-        sleep(1);
-    }
-    return NULL;
-}
-
 int discover_server(int port, struct sockaddr_in* server_addr) {
     int discovery_socket;
     struct sockaddr_in broadcast_addr;
@@ -142,7 +134,7 @@ int send_request(int sockfd, struct sockaddr_in* req_addr, int value, long long*
 
         if (retry < max_retries - 1) {
             printf("Retrying send (attempt %d of %d)...\n", retry + 2, max_retries);
-            usleep(100000);  // 100ms entre tentativas
+            usleep(100000);  // 100ms entre re-tentativas
         }
     }
 
@@ -192,13 +184,6 @@ void RunClient(int port) {
     sigemptyset(&sa.sa_mask);
     sa.sa_flags = 0;
     sigaction(SIGINT, &sa, NULL);
-
-    // Thread para processar entrada do usuário
-    pthread_t input_thread;
-    if (pthread_create(&input_thread, NULL, ClientInputSubprocess, NULL) != 0) {
-        perror("ERROR creating input thread");
-        return;
-    }
 
     // Loop principal do cliente
     int sockfd;
@@ -383,7 +368,4 @@ void RunClient(int port) {
         printf("Failed to connect to server. Retrying in 1 second...\n");
         sleep(1);
     }
-    
-    // Aguarda a thread de entrada terminar
-    pthread_join(input_thread, NULL);
 }

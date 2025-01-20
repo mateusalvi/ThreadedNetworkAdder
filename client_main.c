@@ -8,6 +8,6 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    ClientMain(argv[1]);
+    RunClient(atoi(argv[1]));
     return 0;
 }
