@@ -1,6 +1,5 @@
 /*##########################################################
 # INF01151 - Sistemas Operacionais II N - Turma A (2024/2) #
-#       Adilson Enio Pierog - Andres Grendene Pacheco      #
 #     Luís Filipe Martini Gastmann – Mateus Luiz Salvi     #
 ##########################################################*/
 
@@ -8,44 +7,62 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
-#include <time.h>
-#include <errno.h>
 #include <pthread.h>
-#include <sys/time.h>
+#include <errno.h>
 #include <signal.h>
 #include "client.h"
 #include "server_prot.h"
-#include "config.h"
 
-// Constantes locais
-#define RETRY_DELAY_MS 1000
+#define BROADCAST_ADDR "255.255.255.255"
 
-// Protótipos das funções
-void manual_input(struct sockaddr_in* server_addr, int client_socket);
-void file_input(struct sockaddr_in* server_addr, int client_socket);
-int discover_server(int start_port, struct sockaddr_in* server_addr);
+volatile sig_atomic_t stop = 0;
 
-// Encontra um servidor ativo
-int discover_server(int start_port, struct sockaddr_in* server_addr) {
-    int discovery_socket = socket(AF_INET, SOCK_DGRAM, 0);
+void handle_sigint(int sig) {
+    stop = 1;
+}
+
+void* ClientInputSubprocess(void* arg) {
+    // Esta thread agora só serve para capturar Ctrl+C
+    while (!stop) {
+        sleep(1);
+    }
+    return NULL;
+}
+
+int discover_server(int port, struct sockaddr_in* server_addr) {
+    int discovery_socket;
+    struct sockaddr_in broadcast_addr;
+    packet discovery_packet;
+    
+    // Cria o socket
+    discovery_socket = socket(AF_INET, SOCK_DGRAM, 0);
     if (discovery_socket < 0) {
-        perror("Failed to create discovery socket");
+        perror("ERROR opening socket");
         return -1;
     }
     
-    // Configura timeout para o recvfrom
-    struct timeval tv;
-    tv.tv_sec = 1;  // 1 segundo de timeout
-    tv.tv_usec = 0;
-    setsockopt(discovery_socket, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    // Configura o socket para permitir broadcast
+    int broadcast_enable = 1;
+    if (setsockopt(discovery_socket, SOL_SOCKET, SO_BROADCAST, &broadcast_enable, sizeof(broadcast_enable)) < 0) {
+        perror("ERROR setting broadcast option");
+        close(discovery_socket);
+        return -1;
+    }
+    
+    // Configura o endereço de broadcast
+    memset(&broadcast_addr, 0, sizeof(broadcast_addr));
+    broadcast_addr.sin_family = AF_INET;
+    broadcast_addr.sin_port = htons(port);
+    broadcast_addr.sin_addr.s_addr = inet_addr(BROADCAST_ADDR);
     
     // Prepara o pacote de descoberta
-    packet discovery_packet;
+    memset(&discovery_packet, 0, sizeof(discovery_packet));
     discovery_packet.type = DESC;
-    discovery_packet.data.req.seqn = 0;
+    discovery_packet.data.req.seqn = 1;
     discovery_packet.data.req.value = 0;
     
     // Tenta encontrar um servidor começando da porta inicial
@@ -60,7 +77,7 @@ int discover_server(int start_port, struct sockaddr_in* server_addr) {
         // Configura o endereço do servidor
         server_addr->sin_family = AF_INET;
         server_addr->sin_port = htons(port);
-        server_addr->sin_addr.s_addr = inet_addr("127.0.0.1");
+        server_addr->sin_addr.s_addr = inet_addr(BROADCAST_ADDR);
         
         // Envia o pacote de descoberta
         sendto(discovery_socket, &discovery_packet, sizeof(discovery_packet), 0,
@@ -83,6 +100,8 @@ int discover_server(int start_port, struct sockaddr_in* server_addr) {
         if (response.type == DESC_ACK) {
             request_port = response.data.resp.value;
             printf("Server found! Communication port: %d\n", request_port);
+            // Salva o IP do servidor
+            server_addr->sin_addr = recv_addr.sin_addr;
             break;
         }
     }
@@ -132,412 +151,239 @@ int send_request(int sockfd, struct sockaddr_in* req_addr, int value, long long*
         return -1;
     }
 
-    // Aguarda resposta
+    // Aguarda a resposta
     packet response_packet;
-    memset(&response_packet, 0, sizeof(response_packet));
     socklen_t addr_len = sizeof(*req_addr);
+    ssize_t n = recvfrom(sockfd, &response_packet, sizeof(response_packet), 0,
+                        (struct sockaddr *)req_addr, &addr_len);
 
-    // Tenta receber algumas vezes
-    for (retry = 0; retry < max_retries; retry++) {
-        ssize_t n = recvfrom(sockfd, &response_packet, sizeof(response_packet), 0,
-                            (struct sockaddr *)req_addr, &addr_len);
-
-        if (n == sizeof(response_packet)) {
-            if (response_packet.type == REQ_ACK) {
-                if (response_packet.data.resp.status != 0) {
-                    printf("Server error: status=%d\n", response_packet.data.resp.status);
-                    if (response_packet.data.resp.status == 1) {
-                        printf("Server is not primary, trying to rediscover...\n");
-                        return -2;  // Código especial para tentar redescobrir
-                    }
-                    return -1;
-                }
-                printf("Current sum: %d\n", response_packet.data.resp.value);
-                return response_packet.data.resp.value;
-            } else {
-                printf("Received invalid response type: %d\n", response_packet.type);
-            }
-        } else if (n < 0) {
-            if (errno != EAGAIN && errno != EWOULDBLOCK) {
-                perror("ERROR receiving response");
-            }
-            printf("No response from server\n");
-        } else {
-            printf("Received incomplete response: %d bytes\n", (int)n);
-        }
-
-        if (retry < max_retries - 1) {
-            printf("Retrying receive (attempt %d of %d)...\n", retry + 2, max_retries);
-            usleep(500000);  // 500ms entre tentativas
-        }
-    }
-
-    printf("Failed to receive response after %d attempts\n", max_retries);
-    return -1;
-}
-
-// Função para ler números de um arquivo
-int read_numbers_from_file(const char* filename, int sockfd, struct sockaddr_in* req_addr, long long* seqn) {
-    FILE* file = fopen(filename, "r");
-    if (file == NULL) {
-        perror("ERROR opening file");
+    if (n < 0) {
+        perror("ERROR receiving response");
         return -1;
     }
 
-    int value;
-    int count = 0;
-    printf("Reading numbers from file...\n");
-
-    while (fscanf(file, "%d", &value) == 1) {
-        printf("Sending value: %d\n", value);
-
-        // Tenta enviar até 3 vezes em caso de falha
-        int retries = 0;
-        int result;
-        while ((result = send_request(sockfd, req_addr, value, seqn)) < 0 && retries < MAX_RETRIES) {
-            printf("Failed to send request, retrying...\n");
-            retries++;
-            sleep(1);
-        }
-
-        if (result < 0) {
-            printf("Failed to send request after 3 attempts\n");
-            break;
-        }
-
-        count++;
-        usleep(100000);  // 100ms
+    if (n != sizeof(response_packet)) {
+        printf("Received incomplete response: %d bytes\n", (int)n);
+        return -1;
     }
 
-    fclose(file);
-    printf("Finished reading file. Processed %d numbers.\n", count);
-    return count;
-}
-
-void* ClientInputSubprocess(void* arg) {
-    // Esta thread agora só serve para capturar Ctrl+C
-    while (1) {
-        sleep(1);
+    if (response_packet.type != REQ_ACK) {
+        printf("Received invalid response type: %d\n", response_packet.type);
+        return -1;
     }
-    return NULL;
+
+    printf("Received response: value=%d, seqn=%lld, status=%d\n", 
+           response_packet.data.resp.value, response_packet.data.resp.seqn,
+           response_packet.data.resp.status);
+
+    return response_packet.data.resp.value;
 }
 
 void RunClient(int port) {
+    int value = 0;
     int retries = 0;
+    const int MAX_CLIENT_RETRIES = 3;
+    static long long seqn = 1;
+    struct sockaddr_in server_addr;
+
+    // Configura o manipulador de sinal para SIGINT
+    struct sigaction sa;
+    sa.sa_handler = handle_sigint;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = 0;
+    sigaction(SIGINT, &sa, NULL);
+
+    // Thread para processar entrada do usuário
     pthread_t input_thread;
-    long long seqn = 0;  // Adicionando declaração do número de sequência
-    
-    // Inicia thread de entrada do usuário
-    pthread_create(&input_thread, NULL, (void*(*)(void*))ClientInputSubprocess, NULL);
-    
-    while (1) {
-        int sockfd = socket(AF_INET, SOCK_DGRAM, 0);
-        if (sockfd < 0) {
-            perror("ERROR opening socket");
-            break;
-        }
-        
-        // Configura timeout para o socket
-        struct timeval tv;
-        tv.tv_sec = 1;  // 1 segundo
-        tv.tv_usec = 0;
-        setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-        
-        struct sockaddr_in server_addr;
-        memset(&server_addr, 0, sizeof(server_addr));
-        
-        printf("\nChoose connection type:\n");
-        printf("1. Connect to localhost\n");
+    if (pthread_create(&input_thread, NULL, ClientInputSubprocess, NULL) != 0) {
+        perror("ERROR creating input thread");
+        return;
+    }
+
+    // Loop principal do cliente
+    int sockfd;
+    while (!stop) {
+        int option;
+        printf("\nChoose an option:\n");
+        printf("1. Broadcast to discover server\n");
         printf("2. Connect to specific IP\n");
         printf("3. Exit\n");
         printf("Option: ");
         
-        int input_option;
-        scanf("%d", &input_option);
-        
-        if (input_option == 3) {
-            close(sockfd);
-            break;
+        if (scanf("%d", &option) != 1) {
+            printf("Invalid option\n");
+            return;
         }
-        
-        if (input_option == 1) {
-            printf("Starting server discovery on port %d...\n", port);
-            int request_port = discover_server(port, &server_addr);
-            if (request_port < 0) {
-                printf("No server found!\n");
-                close(sockfd);
-                continue;
-            }
-            server_addr.sin_port = htons(request_port);
-        } else if (input_option == 2) {
-            char ip[256];
-            printf("Enter server IP: ");
-            scanf("%s", ip);
-            server_addr.sin_family = AF_INET;
-            server_addr.sin_port = htons(port);
-            server_addr.sin_addr.s_addr = inet_addr(ip);
-        }
-        
-        getchar();  // Consome newline
-        
-        printf("\nChoose input method:\n");
-        printf("1. Type numbers manually\n");
-        printf("2. Read numbers from file\n");
-        printf("Option: ");
-        scanf("%d", &input_option);
-        getchar();  // Consome newline
-        
-        if (input_option == 1) {
-            printf("Enter numbers to add (0 to exit):\n");
-            
-            while (1) {
-                int value;
-                scanf("%d", &value);
-                getchar();  // Consome newline
-                
-                if (value == 0) break;
-                
-                int result = -1;
-                retries = 0;
-                
-                while (retries < MAX_RETRIES && result < 0) {
-                    result = send_request(sockfd, &server_addr, value, &seqn);
-                    
-                    if (result < 0) {
-                        printf("Failed to send request, retrying...\n");
-                        // Tenta descobrir um novo servidor
-                        printf("Starting server discovery...\n");
-                        int new_port = discover_server(BASE_PORT, &server_addr);
-                        if (new_port > 0) {
-                            server_addr.sin_port = htons(new_port);
-                            printf("Server changed! Updating connection to port %d\n", new_port);
-                        }
-                        retries++;
-                        sleep(1);
+
+        // Limpa o buffer
+        int c;
+        while ((c = getchar()) != '\n' && c != EOF);
+
+        switch (option) {
+            case 1:
+                // Tenta descobrir o servidor usando broadcast
+                server_addr.sin_addr.s_addr = inet_addr(BROADCAST_ADDR);
+                break;
+            case 2:
+                printf("Enter server IP: ");
+                char server_ip[INET_ADDRSTRLEN];
+                if (fgets(server_ip, sizeof(server_ip), stdin) != NULL) {
+                    server_ip[strcspn(server_ip, "\n")] = 0;  // Remove newline
+                    if (inet_pton(AF_INET, server_ip, &server_addr.sin_addr) <= 0) {
+                        perror("ERROR invalid server IP");
+                        continue;
                     }
                 }
-                
-                if (result < 0) {
-                    printf("Failed to send request after %d attempts\n", MAX_RETRIES);
-                    break;
-                }
-            }
-        } else if (input_option == 2) {
-            char filename[256];
-            printf("Enter the filename: ");
-            if (fgets(filename, sizeof(filename), stdin) != NULL) {
-                filename[strcspn(filename, "\n")] = 0;  // Remove newline
-                read_numbers_from_file(filename, sockfd, &server_addr, &seqn);
-            }
-        } else {
-            printf("Invalid option\n");
+                break;
+            case 3:
+                printf("Exiting...\n");
+                stop = 1;
+                break;
+            default:
+                printf("Invalid option\n");
+                continue;
         }
+
+        if (stop) break;
+
+        // Tenta descobrir o servidor
+        int server_port = discover_server(port, &server_addr);
         
-        close(sockfd);
-        break;
+        if (server_port > 0) {
+            printf("Connected to server at %s:%d\n", inet_ntoa(server_addr.sin_addr), server_port);
+            
+            while (!stop) {
+                printf("\nChoose an option:\n");
+                printf("1. Send individual requests\n");
+                printf("2. Read from file\n");
+                printf("3. Exit\n");
+                printf("Option: ");
+                
+                if (scanf("%d", &option) != 1) {
+                    printf("Invalid option\n");
+                    continue;
+                }
+
+                // Limpa o buffer
+                while ((c = getchar()) != '\n' && c != EOF);
+
+                switch (option) {
+                    case 1:
+                        printf("Enter numbers to add (0 to exit):\n");
+                        // Loop para enviar valores individualmente
+                        while (!stop) {
+                            if (scanf("%d", &value) != 1) {
+                                // Limpa o buffer de entrada
+                                while ((c = getchar()) != '\n' && c != EOF);
+                                continue;
+                            }
+
+                            if (value == 0) {
+                                break;
+                            }
+
+                            // Prepara o pacote de requisição
+                            sockfd = socket(AF_INET, SOCK_DGRAM, 0);
+                            if (sockfd < 0) {
+                                perror("ERROR opening socket");
+                                continue;
+                            }
+
+                            // Configura timeout do socket
+                            struct timeval tv;
+                            tv.tv_sec = 0;
+                            tv.tv_usec = SOCKET_TIMEOUT_MS * 1000;
+                            if (setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) < 0) {
+                                perror("ERROR setting timeout");
+                                close(sockfd);
+                                continue;
+                            }
+
+                            // Configura o endereço do servidor
+                            server_addr.sin_port = htons(server_port);
+
+                            // Envia a requisição e aguarda a resposta
+                            int result = send_request(sockfd, &server_addr, value, &seqn);
+                            if (result < 0) {
+                                printf("Failed to communicate with server\n");
+                                close(sockfd);
+                                break;
+                            }
+
+                            printf("Current sum: %d\n", result);
+                            close(sockfd);
+                        }
+                        break;
+                    case 2:
+                        printf("Enter file name: ");
+                        char file_name[256];
+                        if (fgets(file_name, sizeof(file_name), stdin) != NULL) {
+                            file_name[strcspn(file_name, "\n")] = 0;  // Remove newline
+                            FILE *file = fopen(file_name, "r");
+                            if (file == NULL) {
+                                perror("ERROR opening file");
+                                continue;
+                            }
+
+                            // Loop para ler valores do arquivo e enviar
+                            while (fscanf(file, "%d", &value) == 1 && !stop) {
+                                // Prepara o pacote de requisição
+                                sockfd = socket(AF_INET, SOCK_DGRAM, 0);
+                                if (sockfd < 0) {
+                                    perror("ERROR opening socket");
+                                    continue;
+                                }
+
+                                // Configura timeout do socket
+                                struct timeval tv;
+                                tv.tv_sec = 0;
+                                tv.tv_usec = SOCKET_TIMEOUT_MS * 1000;
+                                if (setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) < 0) {
+                                    perror("ERROR setting timeout");
+                                    close(sockfd);
+                                    continue;
+                                }
+
+                                // Configura o endereço do servidor
+                                server_addr.sin_port = htons(server_port);
+
+                                // Envia a requisição e aguarda a resposta
+                                int result = send_request(sockfd, &server_addr, value, &seqn);
+                                if (result < 0) {
+                                    printf("Failed to communicate with server\n");
+                                    close(sockfd);
+                                    break;
+                                }
+
+                                printf("Current sum: %d\n", result);
+                                close(sockfd);
+                            }
+
+                            fclose(file);
+                        }
+                        break;
+                    case 3:
+                        printf("Exiting...\n");
+                        stop = 1;
+                        break;
+                    default:
+                        printf("Invalid option\n");
+                        continue;
+                }
+
+                if (stop) break;
+            }
+        }
+
+        if (++retries >= MAX_CLIENT_RETRIES) {
+            printf("Failed to connect to server after %d attempts\n", MAX_CLIENT_RETRIES);
+            break;
+        }
+
+        printf("Failed to connect to server. Retrying in 1 second...\n");
+        sleep(1);
     }
     
     // Aguarda a thread de entrada terminar
     pthread_join(input_thread, NULL);
-}
-
-void manual_input(struct sockaddr_in* server_addr, int client_socket) {
-    printf("Enter numbers to add (0 to exit):\n");
-    
-    int number;
-    long long seqn = 1;
-    int retry_count = 0;
-    
-    while (1) {
-        scanf("%d", &number);
-        if (number == 0) break;
-        
-        // Prepara o pacote
-        packet request;
-        request.type = REQ;
-        request.data.req.seqn = seqn++;
-        request.data.req.value = number;
-        
-        retry_count = 0;
-        while (retry_count < MAX_RETRIES) {
-            // Envia o pacote
-            sendto(client_socket, &request, sizeof(request), 0,
-                   (struct sockaddr*)server_addr, sizeof(*server_addr));
-            
-            // Espera a resposta
-            packet response;
-            socklen_t addr_len = sizeof(*server_addr);
-            int n = recvfrom(client_socket, &response, sizeof(response), 0,
-                            (struct sockaddr*)server_addr, &addr_len);
-            
-            if (n < 0) {
-                printf("No response from server (timeout)\n");
-                printf("Failed to send request, retrying...\n");
-                
-                // Tenta descobrir um novo servidor
-                printf("Starting server discovery on port 2000...\n");
-                int new_port = discover_server(2000, server_addr);
-                if (new_port > 0) {
-                    server_addr->sin_port = htons(new_port);
-                    printf("Server changed! Updating connection to port %d\n", new_port);
-                }
-                
-                retry_count++;
-                continue;
-            }
-            
-            // Se recebeu resposta, imprime o resultado
-            if (response.type == REQ_ACK) {
-                printf("Current sum: %d\n", response.data.resp.value);
-                break;
-            }
-        }
-        
-        if (retry_count == MAX_RETRIES) {
-            printf("Failed to send request after %d attempts\n", MAX_RETRIES);
-            break;
-        }
-    }
-}
-
-// Função para ler números de um arquivo
-void file_input(struct sockaddr_in* server_addr, int client_socket) {
-    char filename[256];
-    printf("Enter the filename: ");
-    scanf("%s", filename);
-    
-    FILE* file = fopen(filename, "r");
-    if (file == NULL) {
-        perror("ERROR opening file");
-        return;
-    }
-
-    int value;
-    int count = 0;
-    long long seqn = 1;
-    printf("Reading numbers from file...\n");
-
-    while (fscanf(file, "%d", &value) == 1) {
-        printf("Sending value: %d\n", value);
-
-        // Prepara o pacote
-        packet request;
-        request.type = REQ;
-        request.data.req.seqn = seqn++;
-        request.data.req.value = value;
-
-        // Tenta enviar até 3 vezes em caso de falha
-        int retries = 0;
-        while (retries < MAX_RETRIES) {
-            // Envia o pacote
-            sendto(client_socket, &request, sizeof(request), 0,
-                   (struct sockaddr*)server_addr, sizeof(*server_addr));
-            
-            // Espera a resposta
-            packet response;
-            socklen_t addr_len = sizeof(*server_addr);
-            int n = recvfrom(client_socket, &response, sizeof(response), 0,
-                            (struct sockaddr*)server_addr, &addr_len);
-            
-            if (n < 0) {
-                printf("No response from server (timeout)\n");
-                printf("Failed to send request, retrying...\n");
-                
-                // Tenta descobrir um novo servidor
-                printf("Starting server discovery on port 2000...\n");
-                int new_port = discover_server(2000, server_addr);
-                if (new_port > 0) {
-                    server_addr->sin_port = htons(new_port);
-                    printf("Server changed! Updating connection to port %d\n", new_port);
-                }
-                
-                retries++;
-                continue;
-            }
-            
-            // Se recebeu resposta, imprime o resultado
-            if (response.type == REQ_ACK) {
-                printf("Current sum: %d\n", response.data.resp.value);
-                break;
-            }
-        }
-
-        if (retries == MAX_RETRIES) {
-            printf("Failed to send request after %d attempts\n", MAX_RETRIES);
-            break;
-        }
-
-        count++;
-        usleep(100000);  // 100ms
-    }
-
-    fclose(file);
-    printf("Finished reading file. Processed %d numbers.\n", count);
-}
-
-void ClientMain(const char* port) {
-    int option;
-    printf("\nChoose connection type:\n");
-    printf("1. Connect to localhost\n");
-    printf("2. Connect to specific IP\n");
-    printf("3. Exit\n");
-    printf("Option: ");
-    scanf("%d", &option);
-    
-    if (option == 3) {
-        return;
-    }
-    
-    // Cria o socket para comunicação
-    int client_socket = socket(AF_INET, SOCK_DGRAM, 0);
-    if (client_socket < 0) {
-        perror("Failed to create socket");
-        return;
-    }
-    
-    // Configura o endereço do servidor
-    struct sockaddr_in server_addr;
-    memset(&server_addr, 0, sizeof(server_addr));
-    
-    if (option == 1) {
-        printf("Starting server discovery on port 2000...\n");
-        int request_port = discover_server(2000, &server_addr);
-        if (request_port < 0) {
-            printf("No server found\n");
-            close(client_socket);
-            return;
-        }
-        server_addr.sin_port = htons(request_port);
-    } else {
-        char ip[20];
-        int port;
-        printf("Enter server IP: ");
-        scanf("%s", ip);
-        printf("Enter server port: ");
-        scanf("%d", &port);
-        
-        server_addr.sin_family = AF_INET;
-        server_addr.sin_port = htons(port);
-        server_addr.sin_addr.s_addr = inet_addr(ip);
-    }
-    
-    printf("Connected to server at %s:%d\n", 
-           inet_ntoa(server_addr.sin_addr), ntohs(server_addr.sin_port));
-    
-    // Menu de opções
-    printf("\nChoose input method:\n");
-    printf("1. Type numbers manually\n");
-    printf("2. Read numbers from file\n");
-    printf("Option: ");
-    scanf("%d", &option);
-    
-    if (option == 1) {
-        manual_input(&server_addr, client_socket);
-    } else if (option == 2) {
-        file_input(&server_addr, client_socket);
-    } else {
-        printf("Invalid option\n");
-    }
-    
-    close(client_socket);
 }

@@ -8,11 +8,11 @@ RUN apt update && apt install -y gcc
 WORKDIR /app
 
 # Copy the C file to the container
-COPY discovery.h processing.h constants.h server_prot.h  /app/
-COPY RunServer.c discovery.c processing.c server_prot.c  /app/
+COPY discovery.h processing.h constants.h server_prot.h config.h replication.h /app/
+COPY RunServer.c discovery.c processing.c server_prot.c replication.c /app/
 
 # Compile the C program
-RUN gcc RunServer.c -o RunServer discovery.c processing.c server_prot.c -lpthread
+RUN gcc RunServer.c -o RunServer discovery.c processing.c server_prot.c config.h replication.c -lpthread
 
 # Use ENTRYPOINT to allow passing arguments
 ENTRYPOINT ["./RunServer"]

@@ -8,8 +8,8 @@ RUN apt update && apt install -y gcc
 WORKDIR /app
 
 # Copy the C file to the container
-COPY discovery.h processing.h constants.h client.h  /app/
-COPY RunClient.c discovery.c processing.c client.c  /app/
+COPY rand1.txt rand2.txt rand3.txt discovery.h processing.h constants.h client.h config.h server_prot.h replication.h /app/
+COPY RunClient.c discovery.c processing.c client.c server_prot.c replication.c /app/
 
 # Compile the C program
 RUN gcc RunClient.c -o RunClient discovery.c processing.c client.c -lpthread
